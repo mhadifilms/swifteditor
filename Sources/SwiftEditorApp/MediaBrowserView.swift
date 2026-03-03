@@ -43,7 +43,7 @@ struct MediaBrowserView: View {
                 } label: {
                     Image(systemName: "plus")
                 }
-                .buttonStyle(.borderless)
+                .liquidGlassButton()
                 .help("Import Media (Cmd+I)")
                 .accessibilityLabel("Import Media")
                 .accessibilityHint("Open a file picker to import media files into the project")

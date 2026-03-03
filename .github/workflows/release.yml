@@ -1,0 +1,139 @@
+name: Release DMG
+
+on:
+  push:
+    tags: ['v*']
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-dmg:
+    name: Build & Package DMG
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          # Use latest Xcode available on macos-26 runner
+          XCODE_PATH=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE_PATH" ]; then
+            XCODE_PATH="/Applications/Xcode.app"
+          fi
+          echo "Using Xcode at: $XCODE_PATH"
+          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
+          xcodebuild -version
+          swift --version
+
+      - name: Cache SPM dependencies
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-release-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-release-
+            ${{ runner.os }}-spm-
+
+      - name: Build Release
+        run: swift build -c release
+
+      - name: Run Tests
+        run: swift test
+
+      - name: Determine Version
+        id: version
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Create App Bundle
+        run: |
+          set -euo pipefail
+
+          APP_NAME="SwiftEditor"
+          VERSION="${{ steps.version.outputs.tag }}"
+          BUILD_DIR=".build/release"
+          BUNDLE_DIR="$BUILD_DIR/$APP_NAME.app"
+
+          # Create app bundle structure
+          mkdir -p "$BUNDLE_DIR/Contents/MacOS"
+          mkdir -p "$BUNDLE_DIR/Contents/Resources"
+
+          # Copy executable
+          cp "$BUILD_DIR/SwiftEditorApp" "$BUNDLE_DIR/Contents/MacOS/$APP_NAME"
+
+          # Create Info.plist
+          cat > "$BUNDLE_DIR/Contents/Info.plist" << PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleName</key>
+              <string>$APP_NAME</string>
+              <key>CFBundleDisplayName</key>
+              <string>Swift Editor</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.swifteditor.app</string>
+              <key>CFBundleVersion</key>
+              <string>${VERSION#v}</string>
+              <key>CFBundleShortVersionString</key>
+              <string>${VERSION#v}</string>
+              <key>CFBundleExecutable</key>
+              <string>$APP_NAME</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>15.0</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+              <key>NSSupportsAutomaticGraphicsSwitching</key>
+              <true/>
+          </dict>
+          </plist>
+          PLIST
+
+          echo "App bundle created at $BUNDLE_DIR"
+
+      - name: Create DMG
+        run: |
+          set -euo pipefail
+
+          APP_NAME="SwiftEditor"
+          VERSION="${{ steps.version.outputs.tag }}"
+          BUILD_DIR=".build/release"
+          DMG_NAME="${APP_NAME}-${VERSION}-macOS.dmg"
+          STAGING_DIR="$BUILD_DIR/dmg-staging"
+
+          mkdir -p "$STAGING_DIR"
+          cp -R "$BUILD_DIR/$APP_NAME.app" "$STAGING_DIR/"
+
+          # Create a symlink to /Applications for drag-install
+          ln -s /Applications "$STAGING_DIR/Applications"
+
+          # Create DMG
+          hdiutil create \
+            -volname "$APP_NAME $VERSION" \
+            -srcfolder "$STAGING_DIR" \
+            -ov \
+            -format UDZO \
+            "$BUILD_DIR/$DMG_NAME"
+
+          echo "dmg_path=$BUILD_DIR/$DMG_NAME" >> "$GITHUB_ENV"
+          echo "dmg_name=$DMG_NAME" >> "$GITHUB_ENV"
+
+          echo "DMG created: $BUILD_DIR/$DMG_NAME"
+          ls -lh "$BUILD_DIR/$DMG_NAME"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.dmg_path }}
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref, '-alpha') || contains(github.ref, '-beta') || contains(github.ref, '-rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

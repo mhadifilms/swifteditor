@@ -28,7 +28,7 @@ struct InspectorView: View {
                         .padding(.vertical, 6)
                         .background(inspectorTab == tab ? Color.accentColor.opacity(0.15) : Color.clear)
                     }
-                    .buttonStyle(.plain)
+                    .liquidGlassButton()
                     .accessibilityLabel("\(tab.rawValue) inspector")
                     .accessibilityHint("Show \(tab.rawValue.lowercased()) properties for the selected clip")
                     .accessibilityAddTraits(inspectorTab == tab ? .isSelected : [])

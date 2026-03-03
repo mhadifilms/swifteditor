@@ -38,13 +38,74 @@ extension View {
         }
     }
 
-    /// Apply glass effect for the timeline ruler.
+    /// Apply glass effect for the timeline ruler — uses .regular (ruler is navigation, not media).
     @ViewBuilder
     func liquidGlassRuler() -> some View {
         if #available(macOS 26.0, *) {
-            self.glassEffect(.clear, in: RoundedRectangle(cornerRadius: 0))
+            self.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 0))
         } else {
             self.background(.thinMaterial)
+        }
+    }
+
+    /// Apply glass button styling. Falls back to .borderless on pre-macOS 26.
+    @ViewBuilder
+    func liquidGlassButton() -> some View {
+        if #available(macOS 26.0, *) {
+            self.buttonStyle(.glass)
+        } else {
+            self.buttonStyle(.borderless)
+        }
+    }
+
+    /// Apply prominent glass button styling. Falls back to .borderedProminent on pre-macOS 26.
+    @ViewBuilder
+    func liquidGlassProminentButton() -> some View {
+        if #available(macOS 26.0, *) {
+            self.buttonStyle(.glassProminent)
+        } else {
+            self.buttonStyle(.borderedProminent)
+        }
+    }
+}
+
+// MARK: - GlassEffectID Modifier
+
+/// Applies .glassEffectID on macOS 26+ for morphing transitions. No-op on earlier.
+struct GlassEffectIDModifier: ViewModifier {
+    let id: String
+    let namespace: Namespace.ID
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.glassEffectID(id, in: namespace)
+        } else {
+            content
+        }
+    }
+}
+
+// MARK: - GlassEffectContainer Wrapper
+
+/// Wraps content in a GlassEffectContainer on macOS 26+ for correct glass sampling
+/// and morphing transitions. Falls back to a plain container on earlier versions.
+struct LiquidGlassContainer<Content: View>: View {
+    let spacing: CGFloat
+    @ViewBuilder let content: Content
+
+    init(spacing: CGFloat = 20, @ViewBuilder content: () -> Content) {
+        self.spacing = spacing
+        self.content = content()
+    }
+
+    var body: some View {
+        if #available(macOS 26.0, *) {
+            GlassEffectContainer(spacing: spacing) {
+                content
+            }
+        } else {
+            content
         }
     }
 }

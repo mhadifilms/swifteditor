@@ -510,39 +510,43 @@ struct MainWindowView: View {
 struct WorkspaceTabBar: View {
     @Bindable var workspace: WorkspaceManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var tabNamespace
 
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(WorkspaceType.allCases) { type in
-                Button {
-                    if reduceMotion {
-                        workspace.switchTo(type)
-                    } else {
-                        withAnimation(.easeInOut(duration: 0.2)) {
+        LiquidGlassContainer(spacing: 0) {
+            HStack(spacing: 0) {
+                ForEach(WorkspaceType.allCases) { type in
+                    Button {
+                        if reduceMotion {
                             workspace.switchTo(type)
+                        } else {
+                            withAnimation(.bouncy) {
+                                workspace.switchTo(type)
+                            }
                         }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: type.icon)
+                                .font(.system(size: 10))
+                            Text(type.rawValue)
+                                .font(.system(size: 11, weight: workspace.currentWorkspace == type ? .semibold : .regular))
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity)
+                        .background(
+                            workspace.currentWorkspace == type
+                                ? Color.accentColor.opacity(0.15)
+                                : Color.clear
+                        )
                     }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: type.icon)
-                            .font(.system(size: 10))
-                        Text(type.rawValue)
-                            .font(.system(size: 11, weight: workspace.currentWorkspace == type ? .semibold : .regular))
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .frame(maxWidth: .infinity)
-                    .background(
-                        workspace.currentWorkspace == type
-                            ? Color.accentColor.opacity(0.15)
-                            : Color.clear
-                    )
+                    .liquidGlassButton()
+                    .modifier(GlassEffectIDModifier(id: type.rawValue, namespace: tabNamespace))
+                    .help("\(type.rawValue) (Shift+\(type.shortcutNumber))")
+                    .accessibilityLabel("\(type.rawValue) workspace")
+                    .accessibilityHint("Switch to the \(type.rawValue) workspace. Shortcut: Shift+\(type.shortcutNumber)")
+                    .accessibilityAddTraits(workspace.currentWorkspace == type ? .isSelected : [])
                 }
-                .buttonStyle(.plain)
-                .help("\(type.rawValue) (Shift+\(type.shortcutNumber))")
-                .accessibilityLabel("\(type.rawValue) workspace")
-                .accessibilityHint("Switch to the \(type.rawValue) workspace. Shortcut: Shift+\(type.shortcutNumber)")
-                .accessibilityAddTraits(workspace.currentWorkspace == type ? .isSelected : [])
             }
         }
         .liquidGlassTabBar()

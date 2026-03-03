@@ -28,7 +28,7 @@ struct DeliverView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
-            .background(.bar)
+            .liquidGlassSidebarHeader()
 
             Divider()
 
@@ -172,7 +172,7 @@ struct DeliverView: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 8)
                         }
-                        .buttonStyle(.borderedProminent)
+                        .liquidGlassProminentButton()
                         .disabled(engine.timeline.duration <= .zero)
                         .accessibilityLabel("Start Render")
                         .accessibilityHint("Begin exporting the timeline with the selected format settings")

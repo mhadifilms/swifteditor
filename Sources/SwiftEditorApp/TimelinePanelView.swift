@@ -64,7 +64,7 @@ struct TimelinePanelView: View {
                         Spacer()
                     }
                     .frame(width: headerWidth)
-                    .background(.bar)
+                    .liquidGlassSidebarHeader()
 
                     Divider()
 
@@ -857,8 +857,8 @@ struct TransitionHandleView: View {
                     let newDuration = max(0.0, transition.duration.seconds + deltaSeconds)
                     let newRational = Rational(seconds: newDuration)
                     Task {
-                        try? await engine.transitions.removeTransition(transitionID: transition.id)
-                        try? await engine.transitions.addTransition(
+                        _ = try? await engine.transitions.removeTransition(transitionID: transition.id)
+                        _ = try? await engine.transitions.addTransition(
                             clipAID: clipA.id,
                             clipBID: clipB.id,
                             type: transitionTypeString(transition.type),

@@ -33,13 +33,13 @@ struct ScopeView: View {
                             .frame(maxWidth: .infinity)
                             .background(selectedScope == scope ? Color.accentColor.opacity(0.2) : Color.clear)
                     }
-                    .buttonStyle(.plain)
+                    .liquidGlassButton()
                     .accessibilityLabel("\(scope.displayName) scope")
                     .accessibilityHint("Display the \(scope.displayName.lowercased()) video scope")
                     .accessibilityAddTraits(selectedScope == scope ? .isSelected : [])
                 }
             }
-            .background(.bar)
+            .liquidGlassSidebarHeader()
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Scope type selector")
 
@@ -86,7 +86,7 @@ struct ScopeView: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(.bar)
+            .liquidGlassBar()
         }
         .onChange(of: showGraticule) { _, newValue in
             scopeProvider.configuration.showGraticule = newValue

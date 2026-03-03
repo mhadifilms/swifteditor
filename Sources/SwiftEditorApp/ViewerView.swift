@@ -3,6 +3,20 @@ import CoreImage
 import CoreVideo
 import MetalKit
 import SwiftUI
+
+// MARK: - Video Output Factory
+
+/// Free function to construct AVPlayerItemVideoOutput outside @MainActor isolation,
+/// avoiding Swift 6 strict concurrency warnings about [String: Any] Sendable conformance.
+// Note: The [String: Any] Sendable warning below is a known Swift 6 limitation
+// with AVFoundation's Obj-C-bridged API signatures. It is safe and unavoidable.
+private func makeVideoOutput(pixelFormat: OSType) -> AVPlayerItemVideoOutput {
+    let attrs: [String: Any] = [
+        kCVPixelBufferPixelFormatTypeKey as String: Int(pixelFormat),
+        kCVPixelBufferMetalCompatibilityKey as String: true,
+    ]
+    return AVPlayerItemVideoOutput(pixelBufferAttributes: attrs)
+}
 import SwiftEditorAPI
 import ViewerKit
 import RenderEngine
@@ -83,7 +97,7 @@ struct ViewerView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(.bar)
+        .liquidGlassBar()
     }
 
     // MARK: - Program Viewer
@@ -468,11 +482,7 @@ final class ViewerCoordinator: NSObject, MTKViewDelegate, @unchecked Sendable {
 
         // Use HDR pixel format for video output if HDR is active
         let pixelFormat = hdrConfig.isHDR ? kCVPixelFormatType_64RGBAHalf : kCVPixelFormatType_32BGRA
-        let outputSettings: [String: Any] = [
-            kCVPixelBufferPixelFormatTypeKey as String: Int(pixelFormat),
-            kCVPixelBufferMetalCompatibilityKey as String: true,
-        ]
-        let output = AVPlayerItemVideoOutput(pixelBufferAttributes: outputSettings)
+        let output = makeVideoOutput(pixelFormat: pixelFormat)
         videoOutput = output
 
         startRefreshTimer()
@@ -651,11 +661,7 @@ final class SourceViewerCoordinator: NSObject, MTKViewDelegate, @unchecked Senda
             .cacheIntermediates: false,
         ])
 
-        let outputSettings: [String: Any] = [
-            kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
-            kCVPixelBufferMetalCompatibilityKey as String: true,
-        ]
-        videoOutput = AVPlayerItemVideoOutput(pixelBufferAttributes: outputSettings)
+        videoOutput = makeVideoOutput(pixelFormat: kCVPixelFormatType_32BGRA)
 
         loadSource(url: sourceURL)
         startRefreshTimer()

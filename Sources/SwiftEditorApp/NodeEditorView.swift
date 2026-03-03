@@ -103,7 +103,7 @@ struct NodeEditorView: View {
             } label: {
                 Image(systemName: "trash")
             }
-            .buttonStyle(.borderless)
+            .liquidGlassButton()
             .disabled(layout.selectedNodeID == nil && layout.selectedConnectionID == nil)
             .help("Delete selected node or connection")
             .accessibilityLabel("Delete selected")

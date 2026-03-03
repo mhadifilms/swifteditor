@@ -48,7 +48,7 @@ struct DetachedInspectorView: View {
                 Button("Re-dock") {
                     dismissWindow(id: DetachablePanelID.inspector.rawValue)
                 }
-                .buttonStyle(.borderless)
+                .liquidGlassButton()
                 .help("Return inspector to main window")
             }
             .padding(.horizontal, 12)
@@ -78,7 +78,7 @@ struct DetachedBrowserView: View {
                 Button("Re-dock") {
                     dismissWindow(id: DetachablePanelID.browser.rawValue)
                 }
-                .buttonStyle(.borderless)
+                .liquidGlassButton()
                 .help("Return browser to main window")
             }
             .padding(.horizontal, 12)
@@ -108,7 +108,7 @@ struct DetachedScopesView: View {
                 Button("Re-dock") {
                     dismissWindow(id: DetachablePanelID.scopes.rawValue)
                 }
-                .buttonStyle(.borderless)
+                .liquidGlassButton()
                 .help("Return scopes to main window")
             }
             .padding(.horizontal, 12)
@@ -141,7 +141,7 @@ struct MulticamViewerView: View {
                 } label: {
                     Image(systemName: "xmark.circle")
                 }
-                .buttonStyle(.borderless)
+                .liquidGlassButton()
                 .help("Close multicam viewer")
             }
             .padding(.horizontal, 12)
