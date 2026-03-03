@@ -169,3 +169,62 @@ public final class RemoveTrackHandler: CommandHandler, @unchecked Sendable {
         return nil
     }
 }
+
+/// Handler for RippleOverwriteCommand
+public final class RippleOverwriteHandler: CommandHandler, @unchecked Sendable {
+    public typealias CommandType = RippleOverwriteCommand
+    private let timeline: TimelineModel
+
+    public init(timeline: TimelineModel) { self.timeline = timeline }
+    public func validate(_ command: RippleOverwriteCommand) throws {}
+
+    public func execute(_ command: RippleOverwriteCommand) async throws -> (any Command)? {
+        guard timeline.requestRippleOverwrite(
+            sourceAssetID: command.sourceAssetID, trackID: command.trackID,
+            at: command.atTime, sourceIn: command.sourceIn, sourceOut: command.sourceOut
+        ) != nil else {
+            throw CommandError.executionFailed("Ripple overwrite failed")
+        }
+        return nil
+    }
+}
+
+/// Handler for FitToFillCommand
+public final class FitToFillHandler: CommandHandler, @unchecked Sendable {
+    public typealias CommandType = FitToFillCommand
+    private let timeline: TimelineModel
+
+    public init(timeline: TimelineModel) { self.timeline = timeline }
+    public func validate(_ command: FitToFillCommand) throws {}
+
+    public func execute(_ command: FitToFillCommand) async throws -> (any Command)? {
+        guard timeline.requestFitToFill(
+            sourceAssetID: command.sourceAssetID, trackID: command.trackID,
+            at: command.atTime, sourceIn: command.sourceIn, sourceOut: command.sourceOut,
+            fillDuration: command.fillDuration
+        ) != nil else {
+            throw CommandError.executionFailed("Fit to fill failed")
+        }
+        return nil
+    }
+}
+
+/// Handler for ReplaceEditCommand
+public final class ReplaceEditHandler: CommandHandler, @unchecked Sendable {
+    public typealias CommandType = ReplaceEditCommand
+    private let timeline: TimelineModel
+
+    public init(timeline: TimelineModel) { self.timeline = timeline }
+    public func validate(_ command: ReplaceEditCommand) throws {}
+
+    public func execute(_ command: ReplaceEditCommand) async throws -> (any Command)? {
+        guard timeline.requestReplaceEdit(
+            sourceAssetID: command.sourceAssetID, trackID: command.trackID,
+            sourcePlayheadTime: command.sourcePlayheadTime,
+            timelinePlayheadTime: command.timelinePlayheadTime
+        ) != nil else {
+            throw CommandError.executionFailed("Replace edit failed")
+        }
+        return nil
+    }
+}

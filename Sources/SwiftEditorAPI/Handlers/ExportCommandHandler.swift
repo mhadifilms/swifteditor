@@ -4,6 +4,7 @@ import CoreMediaPlus
 import CommandBus
 import RenderEngine
 import TimelineKit
+import EffectsEngine
 
 /// Handler for ExportCommand — bridges to AVAssetExportSession.
 public final class ExportHandler: CommandHandler, @unchecked Sendable {
@@ -12,17 +13,20 @@ public final class ExportHandler: CommandHandler, @unchecked Sendable {
     private let compositionBuilder: CompositionBuilder
     private let timelineProvider: @Sendable () -> TimelineModel
     private let assetResolver: @Sendable (UUID) -> AVAsset?
+    private let effectStackResolver: @Sendable (UUID) -> EffectStack?
     private let onProgress: (@Sendable (Float) -> Void)?
 
     public init(
         compositionBuilder: CompositionBuilder,
         timelineProvider: @escaping @Sendable () -> TimelineModel,
         assetResolver: @escaping @Sendable (UUID) -> AVAsset?,
+        effectStackResolver: @escaping @Sendable (UUID) -> EffectStack? = { _ in nil },
         onProgress: (@Sendable (Float) -> Void)? = nil
     ) {
         self.compositionBuilder = compositionBuilder
         self.timelineProvider = timelineProvider
         self.assetResolver = assetResolver
+        self.effectStackResolver = effectStackResolver
         self.onProgress = onProgress
     }
 
@@ -48,7 +52,8 @@ public final class ExportHandler: CommandHandler, @unchecked Sendable {
                         asset: assetResolver(clip.sourceAssetID),
                         startTime: clip.startTime,
                         sourceIn: clip.sourceIn,
-                        sourceOut: clip.sourceOut
+                        sourceOut: clip.sourceOut,
+                        effectStack: effectStackResolver(clip.id)
                     )
                 }
             )
@@ -63,7 +68,8 @@ public final class ExportHandler: CommandHandler, @unchecked Sendable {
                         asset: assetResolver(clip.sourceAssetID),
                         startTime: clip.startTime,
                         sourceIn: clip.sourceIn,
-                        sourceOut: clip.sourceOut
+                        sourceOut: clip.sourceOut,
+                        effectStack: effectStackResolver(clip.id)
                     )
                 }
             )

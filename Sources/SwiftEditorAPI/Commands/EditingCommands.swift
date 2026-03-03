@@ -141,3 +141,63 @@ public struct RemoveTrackCommand: Command {
         self.trackID = trackID
     }
 }
+
+public struct RippleOverwriteCommand: Command {
+    public static let typeIdentifier = "editing.rippleOverwrite"
+    public let sourceAssetID: UUID
+    public let trackID: UUID
+    public let atTime: Rational
+    public let sourceIn: Rational
+    public let sourceOut: Rational
+    public var undoDescription: String { "Ripple Overwrite" }
+    public var isMutating: Bool { true }
+
+    public init(sourceAssetID: UUID, trackID: UUID, atTime: Rational,
+                sourceIn: Rational, sourceOut: Rational) {
+        self.sourceAssetID = sourceAssetID
+        self.trackID = trackID
+        self.atTime = atTime
+        self.sourceIn = sourceIn
+        self.sourceOut = sourceOut
+    }
+}
+
+public struct FitToFillCommand: Command {
+    public static let typeIdentifier = "editing.fitToFill"
+    public let sourceAssetID: UUID
+    public let trackID: UUID
+    public let atTime: Rational
+    public let sourceIn: Rational
+    public let sourceOut: Rational
+    public let fillDuration: Rational
+    public var undoDescription: String { "Fit to Fill" }
+    public var isMutating: Bool { true }
+
+    public init(sourceAssetID: UUID, trackID: UUID, atTime: Rational,
+                sourceIn: Rational, sourceOut: Rational, fillDuration: Rational) {
+        self.sourceAssetID = sourceAssetID
+        self.trackID = trackID
+        self.atTime = atTime
+        self.sourceIn = sourceIn
+        self.sourceOut = sourceOut
+        self.fillDuration = fillDuration
+    }
+}
+
+public struct ReplaceEditCommand: Command {
+    public static let typeIdentifier = "editing.replaceEdit"
+    public let sourceAssetID: UUID
+    public let trackID: UUID
+    public let sourcePlayheadTime: Rational
+    public let timelinePlayheadTime: Rational
+    public var undoDescription: String { "Replace Edit" }
+    public var isMutating: Bool { true }
+
+    public init(sourceAssetID: UUID, trackID: UUID,
+                sourcePlayheadTime: Rational, timelinePlayheadTime: Rational) {
+        self.sourceAssetID = sourceAssetID
+        self.trackID = trackID
+        self.sourcePlayheadTime = sourcePlayheadTime
+        self.timelinePlayheadTime = timelinePlayheadTime
+    }
+}

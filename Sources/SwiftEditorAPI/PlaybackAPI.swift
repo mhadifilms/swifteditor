@@ -1,4 +1,6 @@
+@preconcurrency import AVFoundation
 import Foundation
+import Combine
 import CoreMediaPlus
 import CommandBus
 import ViewerKit
@@ -12,6 +14,8 @@ public final class PlaybackAPI: @unchecked Sendable {
         self.dispatcher = dispatcher
         self.transport = transport
     }
+
+    // MARK: - Playback Commands
 
     @discardableResult
     public func play() async throws -> CommandResult {
@@ -43,8 +47,31 @@ public final class PlaybackAPI: @unchecked Sendable {
         try await dispatcher.dispatch(StepBackwardCommand(frames: frames))
     }
 
-    /// Direct access to current transport state
+    // MARK: - Transport State
+
+    /// Current playhead position
     public var currentTime: Rational { transport.currentTime }
+
+    /// Whether playback is currently active
     public var isPlaying: Bool { transport.isPlaying }
+
+    /// The current transport state (stopped/playing/paused/shuttling/scrubbing)
     public var transportState: TransportState { transport.transportState }
+
+    /// Combine publisher that emits the current time
+    public var timePublisher: AnyPublisher<Rational, Never> {
+        transport.timePublisher
+    }
+
+    // MARK: - Direct Transport Control
+
+    /// Shuttle at a specific speed (positive = forward, negative = reverse)
+    public func shuttle(speed: Double) {
+        transport.shuttle(speed: speed)
+    }
+
+    /// Set the AVPlayer instance for playback
+    public func setPlayer(_ player: AVPlayer) {
+        transport.setPlayer(player)
+    }
 }

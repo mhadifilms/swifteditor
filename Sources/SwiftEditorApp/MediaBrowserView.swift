@@ -24,6 +24,8 @@ struct MediaBrowserView: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Import Media (Cmd+I)")
+                .accessibilityLabel("Import Media")
+                .accessibilityHint("Open a file picker to import media files into the project")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -95,6 +97,8 @@ struct MediaAssetRow: View {
             }
         }
         .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(asset.name), \(formattedDuration)")
     }
 
     private var iconName: String {

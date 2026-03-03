@@ -5,6 +5,7 @@ import CoreMediaPlus
 /// Full menu bar structure following macOS conventions and NLE standards.
 struct AppMenuCommands: Commands {
     let engine: SwiftEditorEngine
+    @FocusedValue(\.workspaceManager) var workspace
 
     var body: some Commands {
         // Replace default New/Open with our project commands
@@ -58,7 +59,18 @@ struct AppMenuCommands: Commands {
             Divider()
 
             Button("Select All") {
-                // Select all clips
+                var allIDs = Set<UUID>()
+                for track in engine.timeline.videoTracks {
+                    for clip in engine.timeline.clipsOnTrack(track.id) {
+                        allIDs.insert(clip.id)
+                    }
+                }
+                for track in engine.timeline.audioTracks {
+                    for clip in engine.timeline.clipsOnTrack(track.id) {
+                        allIDs.insert(clip.id)
+                    }
+                }
+                engine.timeline.selection = SelectionState(selectedClipIDs: allIDs)
             }
             .keyboardShortcut("a")
 
@@ -69,10 +81,15 @@ struct AppMenuCommands: Commands {
 
             Divider()
 
-            Button("Delete") {
-                deleteSelectedClips()
+            Button("Delete (Lift)") {
+                liftSelectedClips()
             }
             .keyboardShortcut(.delete, modifiers: [])
+
+            Button("Ripple Delete") {
+                rippleDeleteSelectedClips()
+            }
+            .keyboardShortcut(.delete, modifiers: .shift)
         }
 
         // Mark menu
@@ -91,8 +108,20 @@ struct AppMenuCommands: Commands {
 
             Divider()
 
-            Button("Add Marker") { }
-                .keyboardShortcut("m", modifiers: [])
+            Button("Add Marker") {
+                addMarkerAtPlayhead()
+            }
+            .keyboardShortcut("m", modifiers: [])
+
+            Button("Next Marker") {
+                navigateToNextMarker()
+            }
+            .keyboardShortcut(.downArrow, modifiers: .shift)
+
+            Button("Previous Marker") {
+                navigateToPreviousMarker()
+            }
+            .keyboardShortcut(.upArrow, modifiers: .shift)
         }
 
         // Clip menu
@@ -103,7 +132,7 @@ struct AppMenuCommands: Commands {
             .keyboardShortcut("b")
 
             Button("Blade All") {
-                // Blade all tracks at playhead
+                bladeAllAtPlayhead()
             }
             .keyboardShortcut("b", modifiers: [.command, .shift])
 
@@ -113,6 +142,20 @@ struct AppMenuCommands: Commands {
                 toggleClipEnabled()
             }
             .keyboardShortcut("v", modifiers: [])
+
+            Divider()
+
+            Button("Speed...") {
+                // Speed change dialog
+            }
+
+            Button("Slip +1 Frame") {
+                slipSelected(by: Rational(1, 1))
+            }
+
+            Button("Slip -1 Frame") {
+                slipSelected(by: Rational(-1, 1))
+            }
         }
 
         // Timeline menu
@@ -157,10 +200,34 @@ struct AppMenuCommands: Commands {
                 engine.transport.stepBackward()
             }
             .keyboardShortcut(.leftArrow, modifiers: [])
+
+            Divider()
+
+            Button("Go to Start") {
+                Task { await engine.transport.seek(to: .zero) }
+            }
+            .keyboardShortcut(.home, modifiers: [])
+
+            Button("Go to End") {
+                Task { await engine.transport.seek(to: engine.timeline.duration) }
+            }
+            .keyboardShortcut(.end, modifiers: [])
+        }
+
+        // Workspace menu
+        CommandMenu("Workspace") {
+            ForEach(WorkspaceType.allCases) { type in
+                Button(type.rawValue) {
+                    workspace?.switchTo(type)
+                }
+                .keyboardShortcut(KeyEquivalent(Character(type.shortcutNumber)), modifiers: .shift)
+            }
         }
     }
 
-    private func deleteSelectedClips() {
+    // MARK: - Editing Actions
+
+    private func liftSelectedClips() {
         let ids = engine.timeline.selection.selectedClipIDs
         for id in ids {
             engine.timeline.requestClipDelete(clipID: id)
@@ -168,9 +235,16 @@ struct AppMenuCommands: Commands {
         engine.timeline.selection = .empty
     }
 
+    private func rippleDeleteSelectedClips() {
+        let ids = engine.timeline.selection.selectedClipIDs
+        for id in ids {
+            engine.timeline.requestRippleDelete(clipID: id)
+        }
+        engine.timeline.selection = .empty
+    }
+
     private func bladeAtPlayhead() {
         let time = engine.transport.currentTime
-        // Split clip at playhead on the first video track that has a clip at this time
         for track in engine.timeline.videoTracks {
             if let clip = engine.timeline.clipAt(time: time, trackID: track.id) {
                 engine.timeline.requestClipSplit(clipID: clip.id, at: time)
@@ -179,11 +253,41 @@ struct AppMenuCommands: Commands {
         }
     }
 
+    private func bladeAllAtPlayhead() {
+        let time = engine.transport.currentTime
+        engine.timeline.requestBladeAll(at: time)
+    }
+
     private func toggleClipEnabled() {
         for id in engine.timeline.selection.selectedClipIDs {
             if let clip = engine.timeline.clip(by: id) {
                 clip.isEnabled.toggle()
             }
+        }
+    }
+
+    private func slipSelected(by offset: Rational) {
+        for id in engine.timeline.selection.selectedClipIDs {
+            engine.timeline.requestSlip(clipID: id, by: offset)
+        }
+    }
+
+    private func addMarkerAtPlayhead() {
+        let time = engine.transport.currentTime
+        engine.timeline.requestAddMarker(name: "", at: time)
+    }
+
+    private func navigateToNextMarker() {
+        let currentTime = engine.transport.currentTime
+        if let next = engine.timeline.markerManager.nextMarker(after: currentTime) {
+            Task { await engine.transport.seek(to: next.time) }
+        }
+    }
+
+    private func navigateToPreviousMarker() {
+        let currentTime = engine.transport.currentTime
+        if let prev = engine.timeline.markerManager.previousMarker(before: currentTime) {
+            Task { await engine.transport.seek(to: prev.time) }
         }
     }
 }

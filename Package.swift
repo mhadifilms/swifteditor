@@ -19,8 +19,13 @@ let package = Package(
         .library(name: "AudioEngine", targets: ["AudioEngine"]),
         .library(name: "CommandBus", targets: ["CommandBus"]),
         .library(name: "SwiftEditorAPI", targets: ["SwiftEditorAPI"]),
+        .library(name: "CollaborationKit", targets: ["CollaborationKit"]),
+        .library(name: "AIFeatures", targets: ["AIFeatures"]),
+        .library(name: "InterchangeKit", targets: ["InterchangeKit"]),
     ],
-    dependencies: [],
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
+    ],
     targets: [
         // ── Foundation Layer ──────────────────────────────
         .target(
@@ -137,6 +142,42 @@ let package = Package(
             path: "Tests/AudioEngineTests"
         ),
 
+        // ── Collaboration Layer ─────────────────────────────
+        .target(
+            name: "CollaborationKit",
+            dependencies: ["CoreMediaPlus", "TimelineKit"],
+            path: "Sources/CollaborationKit"
+        ),
+        .testTarget(
+            name: "CollaborationKitTests",
+            dependencies: ["CollaborationKit"],
+            path: "Tests/CollaborationKitTests"
+        ),
+
+        // ── AI Features Layer ──────────────────────────────
+        .target(
+            name: "AIFeatures",
+            dependencies: ["CoreMediaPlus"],
+            path: "Sources/AIFeatures"
+        ),
+        .testTarget(
+            name: "AIFeaturesTests",
+            dependencies: ["AIFeatures"],
+            path: "Tests/AIFeaturesTests"
+        ),
+
+        // ── Interchange Layer ──────────────────────────────
+        .target(
+            name: "InterchangeKit",
+            dependencies: ["CoreMediaPlus", "TimelineKit", "ProjectModel"],
+            path: "Sources/InterchangeKit"
+        ),
+        .testTarget(
+            name: "InterchangeKitTests",
+            dependencies: ["InterchangeKit"],
+            path: "Tests/InterchangeKitTests"
+        ),
+
         // ── Public API Layer ─────────────────────────────
         .target(
             name: "SwiftEditorAPI",
@@ -150,6 +191,10 @@ let package = Package(
                 "ViewerKit",
                 "MediaManager",
                 "AudioEngine",
+                "PluginKit",
+                "CollaborationKit",
+                "AIFeatures",
+                "InterchangeKit",
             ],
             path: "Sources/SwiftEditorAPI"
         ),
@@ -172,8 +217,24 @@ let package = Package(
                 "MediaManager",
                 "AudioEngine",
                 "CommandBus",
+                "EffectsEngine",
             ],
-            path: "Sources/SwiftEditorApp"
+            path: "Sources/SwiftEditorApp",
+            exclude: ["Resources"]
+        ),
+
+        // ── CLI Tool ────────────────────────────────────────
+        .executableTarget(
+            name: "SwiftEditorCLI",
+            dependencies: [
+                "SwiftEditorAPI",
+                "CoreMediaPlus",
+                "CommandBus",
+                "TimelineKit",
+                "ProjectModel",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ],
+            path: "Sources/SwiftEditorCLI"
         ),
     ]
 )

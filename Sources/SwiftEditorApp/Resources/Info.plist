@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Bundle identification -->
+    <key>CFBundleIdentifier</key>
+    <string>com.swifteditor.app</string>
+    <key>CFBundleName</key>
+    <string>SwiftEditor</string>
+    <key>CFBundleDisplayName</key>
+    <string>SwiftEditor</string>
+    <key>CFBundleExecutable</key>
+    <string>SwiftEditorApp</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+
+    <!-- Versioning -->
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+
+    <!-- Copyright -->
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright 2025-2026 SwiftEditor contributors. All rights reserved.</string>
+
+    <!-- Minimum macOS version -->
+    <key>LSMinimumSystemVersion</key>
+    <string>15.0</string>
+
+    <!-- Privacy usage descriptions -->
+    <key>NSCameraUsageDescription</key>
+    <string>SwiftEditor uses the camera for live capture and recording.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>SwiftEditor uses the microphone for audio recording and voiceover.</string>
+
+    <!-- Supported document types -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <!-- SwiftEditor project format -->
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>SwiftEditor Project</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.swifteditor.nleproj</string>
+            </array>
+        </dict>
+        <!-- Video files -->
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Video</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.movie</string>
+                <string>public.mpeg-4</string>
+                <string>com.apple.quicktime-movie</string>
+                <string>public.avi</string>
+                <string>org.matroska.mkv</string>
+            </array>
+        </dict>
+        <!-- Audio files -->
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Audio</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.audio</string>
+                <string>public.mp3</string>
+                <string>com.apple.m4a-audio</string>
+                <string>public.aiff-audio</string>
+                <string>org.xiph.flac</string>
+            </array>
+        </dict>
+        <!-- Image files -->
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Image</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.image</string>
+                <string>public.jpeg</string>
+                <string>public.png</string>
+                <string>public.tiff</string>
+                <string>com.compuserve.gif</string>
+                <string>public.heif</string>
+            </array>
+        </dict>
+    </array>
+
+    <!-- Exported Type Identifiers for .nleproj -->
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.swifteditor.nleproj</string>
+            <key>UTTypeDescription</key>
+            <string>SwiftEditor Project</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+                <string>public.content</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>nleproj</string>
+                </array>
+                <key>public.mime-type</key>
+                <string>application/x-swifteditor-project</string>
+            </dict>
+        </dict>
+    </array>
+</dict>
+</plist>

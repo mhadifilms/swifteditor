@@ -73,6 +73,11 @@ public struct ParameterValues: Sendable {
         if case .int(let v) = values[name] { return v }
         return defaultValue
     }
+
+    /// All parameter names.
+    public var allKeys: [String] {
+        Array(values.keys).sorted()
+    }
 }
 
 /// Selection state for the timeline.

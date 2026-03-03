@@ -28,8 +28,13 @@ struct ToolbarView: View {
                                   : Color.clear)
                     )
                     .help("\(tool.rawValue) (\(tool.shortcut))")
+                    .accessibilityLabel("\(tool.rawValue) tool")
+                    .accessibilityHint("Activate the \(tool.rawValue.lowercased()) editing tool. Shortcut: \(tool.shortcut)")
+                    .accessibilityAddTraits(selectedTool == tool ? .isSelected : [])
                 }
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Editing tools")
 
             Divider()
                 .frame(height: 18)
@@ -43,6 +48,8 @@ struct ToolbarView: View {
             }
             .buttonStyle(.borderless)
             .help("Toggle Snapping (N)")
+            .accessibilityLabel("Toggle Snapping")
+            .accessibilityHint("Enable or disable timeline snapping. Shortcut: N")
 
             Spacer()
 
@@ -60,6 +67,8 @@ struct ToolbarView: View {
             .menuStyle(.borderlessButton)
             .frame(width: 28)
             .help("Add Track")
+            .accessibilityLabel("Add Track")
+            .accessibilityHint("Open menu to add a new video or audio track")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)

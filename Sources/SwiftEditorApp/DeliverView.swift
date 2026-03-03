@@ -1,0 +1,205 @@
+import SwiftUI
+import SwiftEditorAPI
+import CoreMediaPlus
+
+/// Export/deliver panel for rendering the timeline to a file.
+/// Shown in the Deliver workspace.
+struct DeliverView: View {
+    let engine: SwiftEditorEngine
+
+    @State private var selectedFormat: ExportFormat = .h264
+    @State private var selectedResolution: ExportResolution = .r1080p
+    @State private var selectedFrameRate: ExportFrameRate = .fps24
+    @State private var outputPath: String = "~/Desktop/export.mp4"
+    @State private var isExporting = false
+    @State private var exportProgress: Double = 0
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Deliver")
+                    .font(.system(size: 11, weight: .medium))
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(.bar)
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    // Format
+                    GroupBox("Format") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Picker("Codec", selection: $selectedFormat) {
+                                ForEach(ExportFormat.allCases) { format in
+                                    Text(format.displayName).tag(format)
+                                }
+                            }
+                            .pickerStyle(.menu)
+
+                            Picker("Resolution", selection: $selectedResolution) {
+                                ForEach(ExportResolution.allCases) { res in
+                                    Text(res.displayName).tag(res)
+                                }
+                            }
+                            .pickerStyle(.menu)
+
+                            Picker("Frame Rate", selection: $selectedFrameRate) {
+                                ForEach(ExportFrameRate.allCases) { fps in
+                                    Text(fps.displayName).tag(fps)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                        }
+                    }
+
+                    // Output
+                    GroupBox("Output") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                TextField("Output Path", text: $outputPath)
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.caption)
+
+                                Button("Browse...") {
+                                    // Open NSSavePanel
+                                }
+                                .font(.caption)
+                                .accessibilityLabel("Browse output location")
+                                .accessibilityHint("Open a file dialog to choose the export destination")
+                            }
+
+                            HStack {
+                                Text("Duration:")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(formatDuration(engine.timeline.duration))
+                                    .font(.caption.monospaced())
+                            }
+
+                            HStack {
+                                Text("Est. Size:")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(estimatedSize)
+                                    .font(.caption.monospaced())
+                            }
+                        }
+                    }
+
+                    // Export button
+                    if isExporting {
+                        VStack(spacing: 8) {
+                            ProgressView(value: exportProgress) {
+                                Text("Exporting...")
+                                    .font(.caption)
+                            }
+                            .progressViewStyle(.linear)
+
+                            Text("\(Int(exportProgress * 100))%")
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+
+                            Button("Cancel") {
+                                isExporting = false
+                                exportProgress = 0
+                            }
+                            .font(.caption)
+                            .accessibilityLabel("Cancel export")
+                            .accessibilityHint("Stop the current export operation")
+                        }
+                    } else {
+                        Button {
+                            isExporting = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "arrow.up.doc")
+                                Text("Start Render")
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(engine.timeline.duration <= .zero)
+                        .accessibilityLabel("Start Render")
+                        .accessibilityHint("Begin exporting the timeline with the selected format settings")
+                    }
+                }
+                .padding(12)
+            }
+        }
+    }
+
+    private func formatDuration(_ time: Rational) -> String {
+        let total = time.seconds
+        let hours = Int(total) / 3600
+        let minutes = (Int(total) % 3600) / 60
+        let seconds = Int(total) % 60
+        let frames = Int((total - Double(Int(total))) * 24)
+        return String(format: "%02d:%02d:%02d:%02d", hours, minutes, seconds, frames)
+    }
+
+    private var estimatedSize: String {
+        let durationSec = engine.timeline.duration.seconds
+        guard durationSec > 0 else { return "--" }
+        let bitrate = selectedFormat.estimatedBitrateMbps * selectedResolution.bitrateMultiplier
+        let sizeMB = bitrate * durationSec / 8
+        if sizeMB > 1024 {
+            return String(format: "%.1f GB", sizeMB / 1024)
+        }
+        return String(format: "%.0f MB", sizeMB)
+    }
+}
+
+// MARK: - Export Configuration Types
+
+enum ExportFormat: String, CaseIterable, Identifiable {
+    case h264 = "H.264"
+    case h265 = "H.265"
+    case prores422 = "ProRes 422"
+    case prores4444 = "ProRes 4444"
+    case proresProxy = "ProRes Proxy"
+
+    var id: String { rawValue }
+
+    var displayName: String { rawValue }
+
+    var estimatedBitrateMbps: Double {
+        switch self {
+        case .h264: return 20
+        case .h265: return 15
+        case .prores422: return 147
+        case .prores4444: return 330
+        case .proresProxy: return 36
+        }
+    }
+}
+
+enum ExportResolution: String, CaseIterable, Identifiable {
+    case r720p = "720p"
+    case r1080p = "1080p"
+    case r4k = "4K UHD"
+
+    var id: String { rawValue }
+    var displayName: String { rawValue }
+
+    var bitrateMultiplier: Double {
+        switch self {
+        case .r720p: return 0.44
+        case .r1080p: return 1.0
+        case .r4k: return 4.0
+        }
+    }
+}
+
+enum ExportFrameRate: String, CaseIterable, Identifiable {
+    case fps24 = "24"
+    case fps25 = "25"
+    case fps30 = "30"
+    case fps60 = "60"
+
+    var id: String { rawValue }
+    var displayName: String { rawValue + " fps" }
+}

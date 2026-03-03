@@ -20,10 +20,11 @@ public final class TimelineModel: @unchecked Sendable {
     public let groupsModel = GroupsModel()
     public let snapModel = SnapModel()
     public let events = TimelineEventBus()
+    public let markerManager = MarkerManager()
 
     // MARK: - Internal State
 
-    private var allClips: [UUID: ClipModel] = [:]
+    var allClips: [UUID: ClipModel] = [:]
 
     public init() {}
 
@@ -305,16 +306,16 @@ public final class TimelineModel: @unchecked Sendable {
         return false
     }
 
-    // MARK: - Private Mutation Methods
+    // MARK: - Internal Mutation Methods
 
-    private func performClipMove(clipID: UUID, toTrack: UUID, at position: Rational) -> Bool {
+    func performClipMove(clipID: UUID, toTrack: UUID, at position: Rational) -> Bool {
         guard let clip = allClips[clipID] else { return false }
         clip.trackID = toTrack
         clip.startTime = position
         return true
     }
 
-    private func performClipResize(clipID: UUID, edge: TrimEdge, to newTime: Rational) -> Bool {
+    func performClipResize(clipID: UUID, edge: TrimEdge, to newTime: Rational) -> Bool {
         guard let clip = allClips[clipID] else { return false }
         switch edge {
         case .leading:
@@ -327,7 +328,7 @@ public final class TimelineModel: @unchecked Sendable {
         return true
     }
 
-    private func performClipRestoreTrim(clipID: UUID, startTime: Rational,
+    func performClipRestoreTrim(clipID: UUID, startTime: Rational,
                                          sourceIn: Rational, sourceOut: Rational) -> Bool {
         guard let clip = allClips[clipID] else { return false }
         clip.startTime = startTime
@@ -336,7 +337,7 @@ public final class TimelineModel: @unchecked Sendable {
         return true
     }
 
-    private func performClipSplit(clipID: UUID, newClipID: UUID, at time: Rational) -> Bool {
+    func performClipSplit(clipID: UUID, newClipID: UUID, at time: Rational) -> Bool {
         guard let clip = allClips[clipID] else { return false }
         let splitSourceTime = clip.sourceIn + (time - clip.startTime)
 
@@ -354,7 +355,7 @@ public final class TimelineModel: @unchecked Sendable {
         return true
     }
 
-    private func performClipUnsplit(originalID: UUID, splitID: UUID) -> Bool {
+    func performClipUnsplit(originalID: UUID, splitID: UUID) -> Bool {
         guard let original = allClips[originalID],
               let split = allClips[splitID] else { return false }
         original.sourceOut = split.sourceOut
@@ -362,18 +363,18 @@ public final class TimelineModel: @unchecked Sendable {
         return true
     }
 
-    private func performClipRemove(clipID: UUID) -> Bool {
+    func performClipRemove(clipID: UUID) -> Bool {
         allClips.removeValue(forKey: clipID) != nil
     }
 
     @discardableResult
-    private func performClipRestore(_ data: ClipModel.Snapshot, trackID: UUID) -> Bool {
+    func performClipRestore(_ data: ClipModel.Snapshot, trackID: UUID) -> Bool {
         let clip = ClipModel(from: data, trackID: trackID)
         allClips[clip.id] = clip
         return true
     }
 
-    private func performTrackInsert(id: UUID, name: String, type: TrackType, at index: Int) -> Bool {
+    func performTrackInsert(id: UUID, name: String, type: TrackType, at index: Int) -> Bool {
         switch type {
         case .video:
             let track = VideoTrackModel(id: id, name: name)
@@ -389,7 +390,7 @@ public final class TimelineModel: @unchecked Sendable {
         return true
     }
 
-    private func performTrackRemove(trackID: UUID, type: TrackType) -> Bool {
+    func performTrackRemove(trackID: UUID, type: TrackType) -> Bool {
         switch type {
         case .video: videoTracks.removeAll { $0.id == trackID }
         case .audio: audioTracks.removeAll { $0.id == trackID }
@@ -398,7 +399,7 @@ public final class TimelineModel: @unchecked Sendable {
         return true
     }
 
-    private func recalculateDuration() {
+    func recalculateDuration() {
         var maxEnd = Rational.zero
         for clip in allClips.values {
             let clipEnd = clip.startTime + clip.duration
@@ -407,7 +408,7 @@ public final class TimelineModel: @unchecked Sendable {
         duration = maxEnd
     }
 
-    private func rebuildInternalState(from sequence: ProjectModel.Sequence) {
+    func rebuildInternalState(from sequence: ProjectModel.Sequence) {
         allClips.removeAll()
         for track in sequence.tracks {
             for clipData in track.clips {

@@ -24,7 +24,11 @@ public final class TransportController: @unchecked Sendable {
         return false
     }
 
-    private var player: AVPlayer?
+    public private(set) var currentPlayer: AVPlayer?
+    private var player: AVPlayer? {
+        get { currentPlayer }
+        set { currentPlayer = newValue }
+    }
     private var timeObserver: Any?
     private let timeSubject = CurrentValueSubject<Rational, Never>(.zero)
 
