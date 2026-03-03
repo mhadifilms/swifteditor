@@ -6,6 +6,7 @@ import CoreMediaPlus
 struct AppMenuCommands: Commands {
     let engine: SwiftEditorEngine
     @FocusedValue(\.workspaceManager) var workspace
+    @Environment(\.openWindow) var openWindow
 
     var body: some Commands {
         // Replace default New/Open with our project commands
@@ -221,6 +222,27 @@ struct AppMenuCommands: Commands {
                     workspace?.switchTo(type)
                 }
                 .keyboardShortcut(KeyEquivalent(Character(type.shortcutNumber)), modifiers: .shift)
+            }
+        }
+
+        // Help menu
+        CommandGroup(replacing: .help) {
+            Button("SwiftEditor Help") {
+                // Open documentation (placeholder)
+                NSWorkspace.shared.open(URL(string: "https://swifteditor.dev/docs")!)
+            }
+
+            Divider()
+
+            Button("Keyboard Shortcuts") {
+                openWindow(id: "keyboard-shortcuts-reference")
+            }
+            .keyboardShortcut("/", modifiers: [.command])
+
+            Divider()
+
+            Button("Release Notes") {
+                NSWorkspace.shared.open(URL(string: "https://swifteditor.dev/releases")!)
             }
         }
     }

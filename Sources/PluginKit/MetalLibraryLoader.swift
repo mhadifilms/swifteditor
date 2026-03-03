@@ -82,7 +82,7 @@ public final class MetalLibraryLoader: @unchecked Sendable {
         lock.unlock()
 
         let options = MTLCompileOptions()
-        options.fastMathEnabled = true
+        options.mathMode = .fast
 
         let library: MTLLibrary
         do {

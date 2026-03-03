@@ -161,6 +161,59 @@ struct InterchangeKitTests {
         #expect(restoredClips.count == origClips.count)
     }
 
+    @Test("FCPXML round-trip preserves clip timing")
+    func testFCPXMLRoundTripClipTiming() throws {
+        let original = sampleProject()
+        let exporter = FCPXMLExporter()
+        let xml = exporter.export(original)
+
+        let importer = FCPXMLImporter()
+        let imported = try importer.parse(string: xml)
+        let restored = imported.toProject()
+
+        let origClip = original.sequences[0].tracks[0].clips[0]
+        let restoredClip = restored.sequences[0].tracks[0].clips[0]
+
+        // Start time (offset) should match
+        #expect(restoredClip.startTime == origClip.startTime)
+        // Source in (start) should match
+        #expect(restoredClip.sourceIn == origClip.sourceIn)
+        // Duration (sourceOut - sourceIn) should match
+        #expect(restoredClip.duration == origClip.duration)
+    }
+
+    @Test("FCPXML round-trip with audio tracks")
+    func testFCPXMLRoundTripWithAudio() throws {
+        let original = sampleProjectWithAudio()
+        let exporter = FCPXMLExporter()
+        let xml = exporter.export(original)
+
+        let importer = FCPXMLImporter()
+        let imported = try importer.parse(string: xml)
+        let restored = imported.toProject()
+
+        let restoredVideoTracks = restored.sequences[0].tracks.filter { $0.trackType == .video }
+        let restoredAudioTracks = restored.sequences[0].tracks.filter { $0.trackType == .audio }
+
+        #expect(restoredVideoTracks.count == 1)
+        #expect(restoredAudioTracks.count == 1)
+        #expect(restoredVideoTracks[0].clips.count == 1)
+        #expect(restoredAudioTracks[0].clips.count == 1)
+    }
+
+    @Test("ImportedProject.toProject() sets correct resolution and frame rate")
+    func testImportedProjectSettings() throws {
+        let xml = sampleFCPXML()
+        let importer = FCPXMLImporter()
+        let imported = try importer.parse(string: xml)
+        let project = imported.toProject()
+
+        #expect(project.settings.videoParams.width == 1920)
+        #expect(project.settings.videoParams.height == 1080)
+        // 1/24s frame duration -> 24 fps frame rate
+        #expect(project.settings.frameRate == Rational(24, 1))
+    }
+
     // MARK: - EDL Export
 
     @Test("EDLExporter produces valid CMX3600 format")

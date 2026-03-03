@@ -15,19 +15,22 @@ public final class ExportHandler: CommandHandler, @unchecked Sendable {
     private let assetResolver: @Sendable (UUID) -> AVAsset?
     private let effectStackResolver: @Sendable (UUID) -> EffectStack?
     private let onProgress: (@Sendable (Float) -> Void)?
+    private let onSmartRenderAnalysis: (@Sendable ([ExportSegment], Double) -> Void)?
 
     public init(
         compositionBuilder: CompositionBuilder,
         timelineProvider: @escaping @Sendable () -> TimelineModel,
         assetResolver: @escaping @Sendable (UUID) -> AVAsset?,
         effectStackResolver: @escaping @Sendable (UUID) -> EffectStack? = { _ in nil },
-        onProgress: (@Sendable (Float) -> Void)? = nil
+        onProgress: (@Sendable (Float) -> Void)? = nil,
+        onSmartRenderAnalysis: (@Sendable ([ExportSegment], Double) -> Void)? = nil
     ) {
         self.compositionBuilder = compositionBuilder
         self.timelineProvider = timelineProvider
         self.assetResolver = assetResolver
         self.effectStackResolver = effectStackResolver
         self.onProgress = onProgress
+        self.onSmartRenderAnalysis = onSmartRenderAnalysis
     }
 
     public func validate(_ command: ExportCommand) throws {
@@ -78,6 +81,16 @@ public final class ExportHandler: CommandHandler, @unchecked Sendable {
         let renderSize = renderSizeForPreset(command.preset)
         let frameDuration = CMTime(value: 1, timescale: 24)
 
+        // Run SmartRenderer analysis before export to determine passthrough segments
+        let smartRenderer = SmartRenderer()
+        let outputFormat = exportFormatForPreset(command.preset, renderSize: renderSize)
+        let sourceClips = buildSourceClipInfos(from: videoTrackData, outputFormat: outputFormat)
+        let segments = smartRenderer.analyze(clips: sourceClips, outputFormat: outputFormat)
+        let ratio = smartRenderer.passthroughRatio(segments: segments)
+
+        // Report analysis results via callback
+        onSmartRenderAnalysis?(segments, ratio)
+
         let result = try await compositionBuilder.buildComposition(
             videoTracks: videoTrackData,
             audioTracks: audioTrackData,
@@ -103,9 +116,19 @@ public final class ExportHandler: CommandHandler, @unchecked Sendable {
         // Remove existing file if present
         try? FileManager.default.removeItem(at: command.outputURL)
 
-        // Export using modern API
+        // Start a progress polling timer before export
+        let progressCallback = onProgress
+        let progressTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+            progressCallback?(session.progress)
+        }
+
+        defer {
+            progressTimer.invalidate()
+            progressCallback?(1.0)
+        }
+
+        // Export using modern async API
         try await session.export(to: command.outputURL, as: fileType)
-        onProgress?(1.0)
 
         return nil
     }
@@ -151,5 +174,51 @@ public final class ExportHandler: CommandHandler, @unchecked Sendable {
         case .prores422, .prores4444, .proresProxy:
             return .mov
         }
+    }
+
+    // MARK: - SmartRenderer Helpers
+
+    private func exportFormatForPreset(_ preset: ExportPreset, renderSize: CGSize) -> ExportFormat {
+        let codec: VideoCodec = switch preset {
+        case .h264_1080p, .h264_4k: .h264
+        case .h265_1080p, .h265_4k: .hevc
+        case .prores422: .prores422
+        case .prores4444: .prores4444
+        case .proresProxy: .proresProxy
+        }
+        return ExportFormat(
+            codec: codec,
+            width: Int(renderSize.width),
+            height: Int(renderSize.height),
+            frameRate: Rational(24, 1)
+        )
+    }
+
+    private func buildSourceClipInfos(
+        from videoTrackData: [CompositionBuilder.TrackBuildData],
+        outputFormat: ExportFormat
+    ) -> [SourceClipInfo] {
+        var clipInfos: [SourceClipInfo] = []
+        let allClips = videoTrackData.flatMap(\.clips)
+
+        for clip in allClips {
+            let hasEffects = clip.effectStack?.activeEffects.isEmpty == false
+            clipInfos.append(SourceClipInfo(
+                clipID: clip.clipID,
+                timeRange: TimeRange(
+                    start: clip.startTime,
+                    duration: clip.duration
+                ),
+                codec: .unknown,
+                width: outputFormat.width,
+                height: outputFormat.height,
+                hasEffects: hasEffects,
+                hasTransform: false,
+                opacity: clip.opacity,
+                blendMode: clip.blendMode,
+                isComposited: false
+            ))
+        }
+        return clipInfos
     }
 }

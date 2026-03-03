@@ -34,6 +34,16 @@ public actor BackgroundRenderer {
         self.framesBehind = framesBehind
     }
 
+    /// Set the render frame callback.
+    public func setRenderFrame(_ callback: @escaping @Sendable (Rational) async -> FrameCache.CachedFrame?) {
+        self.renderFrame = callback
+    }
+
+    /// Set the frame hash callback.
+    public func setFrameHashForTime(_ callback: @escaping @Sendable (Rational) -> FrameHash) {
+        self.frameHashForTime = callback
+    }
+
     /// Begin background pre-rendering.
     public func start() {
         isRunning = true

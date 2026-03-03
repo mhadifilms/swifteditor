@@ -533,6 +533,38 @@ extension TimelineModel {
         return true
     }
 
+    // MARK: - Speed Ramp (Variable Speed)
+
+    /// Sets or clears a speed ramp curve on a clip.
+    /// When a speed ramp is active, the clip's output duration is determined by the curve
+    /// and the compositor uses remapped time to fetch source frames.
+    @discardableResult
+    public func requestSetSpeedRamp(clipID: UUID, curve: TimeRemapCurve?) -> Bool {
+        guard let clip = allClips[clipID] else { return false }
+
+        let oldSpeedRamp = clip.speedRamp
+
+        var undo: UndoAction = { true }
+        var redo: UndoAction = { true }
+
+        appendOperation(&redo) { [weak self] in
+            guard let c = self?.allClips[clipID] else { return false }
+            c.speedRamp = curve
+            return true
+        }
+        prependOperation(&undo) { [weak self] in
+            guard let c = self?.allClips[clipID] else { return false }
+            c.speedRamp = oldSpeedRamp
+            return true
+        }
+
+        guard redo() else { let _ = undo(); return false }
+        undoManager.record(undo: undo, redo: redo, description: "Speed Ramp")
+        recalculateDuration()
+        events.send(.clipResized(clipID: clipID))
+        return true
+    }
+
     // MARK: - Ripple Overwrite
     // Replace a clip AND adjust timeline duration
 

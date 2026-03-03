@@ -10,13 +10,15 @@ import EffectsEngine
 public final class MetalCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
 
     public var sourcePixelBufferAttributes: [String: any Sendable]? {
-        [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-         kCVPixelBufferMetalCompatibilityKey as String: true]
+        let pixelFormat = hdrConfig.isHDR ? kCVPixelFormatType_64RGBAHalf : kCVPixelFormatType_32BGRA
+        return [kCVPixelBufferPixelFormatTypeKey as String: pixelFormat,
+                kCVPixelBufferMetalCompatibilityKey as String: true]
     }
 
     public var requiredPixelBufferAttributesForRenderContext: [String: any Sendable] {
-        [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-         kCVPixelBufferMetalCompatibilityKey as String: true]
+        let pixelFormat = hdrConfig.isHDR ? kCVPixelFormatType_64RGBAHalf : kCVPixelFormatType_32BGRA
+        return [kCVPixelBufferPixelFormatTypeKey as String: pixelFormat,
+                kCVPixelBufferMetalCompatibilityKey as String: true]
     }
 
     public var supportsHDRSourceFrames: Bool { true }
@@ -30,12 +32,30 @@ public final class MetalCompositor: NSObject, AVVideoCompositing, @unchecked Sen
                                             qos: .userInteractive)
     private var isCancelled = false
 
+    /// HDR configuration controlling color space and pixel format.
+    public var hdrConfig: HDRConfiguration = .sdrDefault()
+
     override public init() {
         let renderDevice = MetalRenderingDevice.shared
         self.device = renderDevice.device
         self.commandQueue = renderDevice.commandQueue
         self.ciContext = CIContext(mtlDevice: renderDevice.device, options: [
             .workingColorSpace: CGColorSpace(name: CGColorSpace.linearSRGB)!,
+            .outputPremultiplied: true,
+        ])
+        self.transitionRenderer = TransitionRenderer()
+        super.init()
+    }
+
+    /// Initialize with an explicit HDR configuration.
+    public init(hdrConfiguration: HDRConfiguration) {
+        let renderDevice = MetalRenderingDevice.shared
+        self.device = renderDevice.device
+        self.commandQueue = renderDevice.commandQueue
+        self.hdrConfig = hdrConfiguration
+        let colorSpace = hdrConfiguration.cgColorSpace ?? CGColorSpace(name: CGColorSpace.linearSRGB)!
+        self.ciContext = CIContext(mtlDevice: renderDevice.device, options: [
+            .workingColorSpace: colorSpace,
             .outputPremultiplied: true,
         ])
         self.transitionRenderer = TransitionRenderer()
@@ -230,7 +250,41 @@ public final class MetalCompositor: NSObject, AVVideoCompositing, @unchecked Sen
         let cropRect = CGRect(origin: .zero, size: renderSize)
         let croppedImage = image.cropped(to: cropRect)
 
-        ciContext.render(croppedImage, to: buffer, bounds: cropRect, colorSpace: CGColorSpaceCreateDeviceRGB())
+        let outputColorSpace = hdrConfig.cgColorSpace ?? CGColorSpaceCreateDeviceRGB()
+        ciContext.render(croppedImage, to: buffer, bounds: cropRect, colorSpace: outputColorSpace)
+        return buffer
+    }
+
+    // MARK: - Standalone Rendering (for BackgroundRenderer)
+
+    /// Render a CIImage to a CVPixelBuffer of the given size.
+    /// Used by BackgroundRenderer for pre-rendering frames outside of AVVideoCompositing.
+    public func renderImageToPixelBuffer(
+        _ image: CIImage,
+        size: CGSize
+    ) -> CVPixelBuffer? {
+        let pixelFormat = hdrConfig.isHDR ? kCVPixelFormatType_64RGBAHalf : kCVPixelFormatType_32BGRA
+        let attributes: [CFString: Any] = [
+            kCVPixelBufferWidthKey: Int(size.width),
+            kCVPixelBufferHeightKey: Int(size.height),
+            kCVPixelBufferPixelFormatTypeKey: pixelFormat,
+            kCVPixelBufferMetalCompatibilityKey: true,
+        ]
+        var pixelBuffer: CVPixelBuffer?
+        let status = CVPixelBufferCreate(
+            kCFAllocatorDefault,
+            Int(size.width),
+            Int(size.height),
+            pixelFormat,
+            attributes as CFDictionary,
+            &pixelBuffer
+        )
+        guard status == kCVReturnSuccess, let buffer = pixelBuffer else { return nil }
+
+        let cropRect = CGRect(origin: .zero, size: size)
+        let croppedImage = image.cropped(to: cropRect)
+        let outputColorSpace = hdrConfig.cgColorSpace ?? CGColorSpaceCreateDeviceRGB()
+        ciContext.render(croppedImage, to: buffer, bounds: cropRect, colorSpace: outputColorSpace)
         return buffer
     }
 

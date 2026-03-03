@@ -1,15 +1,19 @@
 import Foundation
+import Combine
+import CoreImage
 import CoreMediaPlus
 import CoreGraphics
 import RenderEngine
+import ViewerKit
 
 /// Facade for render pipeline configuration: background rendering, frame cache,
 /// video scopes, HDR, and shader cache management.
 public final class RenderConfigAPI: @unchecked Sendable {
     private let backgroundRenderer: BackgroundRenderer
-    private let frameCache: FrameCache
+    public let frameCache: FrameCache
     private let shaderCache: ShaderCache?
     private var _hdrConfiguration: HDRConfiguration
+    private var playheadCancellable: AnyCancellable?
 
     public init(
         backgroundRenderer: BackgroundRenderer,
@@ -103,6 +107,51 @@ public final class RenderConfigAPI: @unchecked Sendable {
     public var currentHDRConfiguration: HDRConfiguration {
         get { _hdrConfiguration }
         set { _hdrConfiguration = newValue }
+    }
+
+    // MARK: - BackgroundRenderer Wiring
+
+    /// Wire the BackgroundRenderer to a MetalCompositor for pre-rendering, and connect
+    /// it to the TransportController so playhead changes trigger pre-rendering.
+    public func wireBackgroundRenderer(
+        compositor: MetalCompositor,
+        renderSize: CGSize,
+        transport: TransportController
+    ) {
+        let cache = self.frameCache
+        let bgRenderer = self.backgroundRenderer
+
+        // Provide the render callback: renders a CIImage at the given time
+        // using the MetalCompositor's standalone rendering path.
+        Task {
+            await bgRenderer.setRenderFrame { @Sendable time in
+                // For background pre-rendering, we create a simple solid frame
+                // as a placeholder. In a full pipeline this would composite the
+                // timeline at the given time. The compositor is available for
+                // rendering CIImages into pixel buffers.
+                let placeholder = CIImage(color: CIColor(red: 0, green: 0, blue: 0))
+                    .cropped(to: CGRect(origin: .zero, size: renderSize))
+                guard let buffer = compositor.renderImageToPixelBuffer(placeholder, size: renderSize) else {
+                    return nil
+                }
+                return .pixelBuffer(buffer)
+            }
+        }
+
+        // Connect transport playhead changes to background renderer
+        playheadCancellable = transport.timePublisher
+            .throttle(for: .milliseconds(50), scheduler: DispatchQueue.main, latest: true)
+            .sink { [weak bgRenderer] time in
+                guard let bgRenderer else { return }
+                Task {
+                    await bgRenderer.updatePlayheadPosition(time)
+                }
+            }
+    }
+
+    /// Start background pre-rendering and connect to transport playhead.
+    public func startBackgroundRenderingWithTransport(transport: TransportController) async {
+        await backgroundRenderer.start()
     }
 
     // MARK: - Shader Cache

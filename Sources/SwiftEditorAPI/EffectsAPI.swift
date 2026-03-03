@@ -69,6 +69,13 @@ public final class EffectsAPI: @unchecked Sendable {
         return try await dispatcher.dispatch(command)
     }
 
+    /// Set or clear a speed ramp curve on a clip.
+    @discardableResult
+    public func setSpeedRamp(clipID: UUID, curve: TimeRemapCurve?) async throws -> CommandResult {
+        let command = SetSpeedRampCommand(clipID: clipID, curve: curve)
+        return try await dispatcher.dispatch(command)
+    }
+
     /// Get the effect stack for a clip (read-only access).
     public func effects(for clipID: UUID) -> EffectStack {
         effectStacks.stack(for: clipID)

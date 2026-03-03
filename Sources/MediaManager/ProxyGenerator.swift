@@ -141,19 +141,25 @@ public actor ProxyGenerator {
         writer.startSession(atSourceTime: .zero)
 
         // Write video
+        // AVFoundation types are not Sendable but are safe to use in requestMediaDataWhenReady callbacks
+        // since the callback is serialized on the provided queue.
+        nonisolated(unsafe) let videoWriterInputUnsafe = videoWriterInput
+        nonisolated(unsafe) let videoReaderOutputUnsafe = videoReaderOutput
+        nonisolated(unsafe) let readerUnsafe = reader
+        nonisolated(unsafe) let writerUnsafe = writer
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Swift.Error>) in
-            videoWriterInput.requestMediaDataWhenReady(on: .global(qos: .userInitiated)) {
-                while videoWriterInput.isReadyForMoreMediaData {
+            videoWriterInputUnsafe.requestMediaDataWhenReady(on: .global(qos: .userInitiated)) {
+                while videoWriterInputUnsafe.isReadyForMoreMediaData {
                     if Task.isCancelled {
-                        reader.cancelReading()
-                        writer.cancelWriting()
+                        readerUnsafe.cancelReading()
+                        writerUnsafe.cancelWriting()
                         continuation.resume(throwing: Error.cancelled)
                         return
                     }
-                    if let sampleBuffer = videoReaderOutput.copyNextSampleBuffer() {
-                        videoWriterInput.append(sampleBuffer)
+                    if let sampleBuffer = videoReaderOutputUnsafe.copyNextSampleBuffer() {
+                        videoWriterInputUnsafe.append(sampleBuffer)
                     } else {
-                        videoWriterInput.markAsFinished()
+                        videoWriterInputUnsafe.markAsFinished()
                         continuation.resume()
                         return
                     }
@@ -163,17 +169,19 @@ public actor ProxyGenerator {
 
         // Write audio
         if let audioOutput = audioReaderOutput, let audioInput = audioWriterInput {
+            nonisolated(unsafe) let audioInputUnsafe = audioInput
+            nonisolated(unsafe) let audioOutputUnsafe = audioOutput
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Swift.Error>) in
-                audioInput.requestMediaDataWhenReady(on: .global(qos: .userInitiated)) {
-                    while audioInput.isReadyForMoreMediaData {
+                audioInputUnsafe.requestMediaDataWhenReady(on: .global(qos: .userInitiated)) {
+                    while audioInputUnsafe.isReadyForMoreMediaData {
                         if Task.isCancelled {
                             continuation.resume(throwing: Error.cancelled)
                             return
                         }
-                        if let sampleBuffer = audioOutput.copyNextSampleBuffer() {
-                            audioInput.append(sampleBuffer)
+                        if let sampleBuffer = audioOutputUnsafe.copyNextSampleBuffer() {
+                            audioInputUnsafe.append(sampleBuffer)
                         } else {
-                            audioInput.markAsFinished()
+                            audioInputUnsafe.markAsFinished()
                             continuation.resume()
                             return
                         }

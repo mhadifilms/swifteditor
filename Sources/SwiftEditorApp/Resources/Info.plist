@@ -28,6 +28,10 @@
     <key>LSMinimumSystemVersion</key>
     <string>15.0</string>
 
+    <!-- Sparkle auto-update feed -->
+    <key>SUFeedURL</key>
+    <string>https://swifteditor.app/appcast.xml</string>
+
     <!-- Privacy usage descriptions -->
     <key>NSCameraUsageDescription</key>
     <string>SwiftEditor uses the camera for live capture and recording.</string>
@@ -104,7 +108,7 @@
         </dict>
     </array>
 
-    <!-- Exported Type Identifiers for .nleproj -->
+    <!-- Exported Type Identifiers for .nleproj and internal drag types -->
     <key>UTExportedTypeDeclarations</key>
     <array>
         <dict>
@@ -126,6 +130,16 @@
                 <key>public.mime-type</key>
                 <string>application/x-swifteditor-project</string>
             </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.swifteditor.mediaAssetTransfer</string>
+            <key>UTTypeDescription</key>
+            <string>SwiftEditor Media Asset Transfer</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+            </array>
         </dict>
     </array>
 </dict>

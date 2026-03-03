@@ -12,6 +12,10 @@ public final class CompositionBuilder: @unchecked Sendable {
         public let audioMix: AVMutableAudioMix?
     }
 
+    /// Optional URL resolver for proxy mode. When set, asset URLs are resolved
+    /// through this closure before being used in the composition.
+    public var urlResolver: (@Sendable (URL) async -> URL)?
+
     public init() {}
 
     /// Build an AVPlayerItem from timeline data.
@@ -36,6 +40,16 @@ public final class CompositionBuilder: @unchecked Sendable {
         return playerItem
     }
 
+    /// Resolve an AVAsset through the proxy URL resolver if available.
+    private func resolveAsset(_ asset: AVAsset?) async -> AVAsset? {
+        guard let asset else { return nil }
+        guard let resolver = urlResolver,
+              let urlAsset = asset as? AVURLAsset else { return asset }
+        let resolvedURL = await resolver(urlAsset.url)
+        if resolvedURL == urlAsset.url { return asset }
+        return AVURLAsset(url: resolvedURL)
+    }
+
     /// Build the AVFoundation composition objects.
     public func buildComposition(
         videoTracks: [TrackBuildData],
@@ -56,7 +70,8 @@ public final class CompositionBuilder: @unchecked Sendable {
             ) else { continue }
 
             for clip in trackData.clips {
-                guard let asset = clip.asset else { continue }
+                let resolvedAsset = await resolveAsset(clip.asset)
+                guard let asset = resolvedAsset else { continue }
                 guard let sourceTrack = try? await asset.loadTracks(withMediaType: .video).first else { continue }
 
                 let insertTime = clip.startTime.cmTime
@@ -78,7 +93,8 @@ public final class CompositionBuilder: @unchecked Sendable {
             ) else { continue }
 
             for clip in trackData.clips {
-                guard let asset = clip.asset else { continue }
+                let resolvedAsset = await resolveAsset(clip.asset)
+                guard let asset = resolvedAsset else { continue }
                 guard let sourceTrack = try? await asset.loadTracks(withMediaType: .audio).first else { continue }
 
                 let insertTime = clip.startTime.cmTime

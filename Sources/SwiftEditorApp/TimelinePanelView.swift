@@ -1,6 +1,11 @@
 import SwiftUI
+import AppKit
+@preconcurrency import AVFoundation
 import SwiftEditorAPI
 import TimelineKit
+import AudioEngine
+import MediaManager
+import EffectsEngine
 import CoreMediaPlus
 
 /// The timeline panel with track headers, clip lanes, ruler, and playhead.
@@ -10,6 +15,7 @@ struct TimelinePanelView: View {
 
     @State private var pixelsPerSecond: CGFloat = 40.0
     @State private var scrollOffset: CGFloat = 0
+    @State private var isScrubbing: Bool = false
 
     private let trackHeight: CGFloat = 48
     private let rulerHeight: CGFloat = 24
@@ -48,6 +54,13 @@ struct TimelinePanelView: View {
                                 .frame(height: trackHeight)
                         }
 
+                        // Subtitle track headers
+                        ForEach(engine.timeline.subtitleTracks) { track in
+                            TrackHeaderView(name: track.name, type: .subtitle,
+                                            isMuted: track.isMuted, isLocked: track.isLocked)
+                                .frame(height: trackHeight)
+                        }
+
                         Spacer()
                     }
                     .frame(width: headerWidth)
@@ -63,12 +76,27 @@ struct TimelinePanelView: View {
                         )
 
                         ZStack(alignment: .topLeading) {
-                            // Ruler
+                            // Ruler with scrubbing gestures
                             TimelineRulerView(
                                 pixelsPerSecond: pixelsPerSecond,
                                 totalWidth: CGFloat(canvasWidth)
                             )
                             .frame(height: rulerHeight)
+                            .contentShape(Rectangle())
+                            .gesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onChanged { value in
+                                        isScrubbing = true
+                                        let seconds = max(0, Double(value.location.x) / Double(pixelsPerSecond))
+                                        let time = Rational(seconds: seconds)
+                                        Task { await engine.transport.seek(to: time) }
+                                    }
+                                    .onEnded { _ in
+                                        isScrubbing = false
+                                    }
+                            )
+                            .accessibilityAddTraits(.allowsDirectInteraction)
+                            .accessibilityHint("Tap or drag to scrub the playhead")
 
                             // Track lanes
                             VStack(spacing: 0) {
@@ -99,6 +127,16 @@ struct TimelinePanelView: View {
                                         selection: engine.timeline.selection,
                                         engine: engine,
                                         selectedTool: selectedTool
+                                    )
+                                    .frame(height: trackHeight)
+                                }
+
+                                // Subtitle track lanes
+                                ForEach(engine.timeline.subtitleTracks) { track in
+                                    SubtitleTrackLaneView(
+                                        track: track,
+                                        pixelsPerSecond: pixelsPerSecond,
+                                        trackHeight: trackHeight
                                     )
                                     .frame(height: trackHeight)
                                 }
@@ -145,13 +183,13 @@ struct TimelinePanelView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 4)
-            .background(.bar)
+            .liquidGlassBar()
         }
         .background(Color(nsColor: .controlBackgroundColor))
     }
 
     private var totalTrackHeight: CGFloat {
-        CGFloat(engine.timeline.videoTracks.count + engine.timeline.audioTracks.count) * trackHeight
+        CGFloat(engine.timeline.videoTracks.count + engine.timeline.audioTracks.count + engine.timeline.subtitleTracks.count) * trackHeight
     }
 
     private func timecodeString(_ time: Rational) -> String {
@@ -173,7 +211,7 @@ struct TrackHeaderView: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: type == .video ? "video" : "speaker.wave.2")
+            Image(systemName: trackIcon)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
@@ -198,15 +236,37 @@ struct TrackHeaderView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background {
             RoundedRectangle(cornerRadius: 2)
-                .fill(type == .video
-                      ? Color.blue.opacity(0.05)
-                      : Color.green.opacity(0.05))
+                .fill(trackBackgroundColor)
         }
         .overlay(alignment: .bottom) {
             Divider()
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(type == .video ? "Video" : "Audio") track: \(name)\(isMuted ? ", muted" : "")\(isLocked ? ", locked" : "")")
+        .accessibilityLabel("\(trackLabel) track: \(name)\(isMuted ? ", muted" : "")\(isLocked ? ", locked" : "")")
+    }
+
+    private var trackIcon: String {
+        switch type {
+        case .video: return "video"
+        case .audio: return "speaker.wave.2"
+        case .subtitle: return "captions.bubble"
+        }
+    }
+
+    private var trackBackgroundColor: Color {
+        switch type {
+        case .video: return Color.blue.opacity(0.05)
+        case .audio: return Color.green.opacity(0.05)
+        case .subtitle: return Color.yellow.opacity(0.05)
+        }
+    }
+
+    private var trackLabel: String {
+        switch type {
+        case .video: return "Video"
+        case .audio: return "Audio"
+        case .subtitle: return "Subtitle"
+        }
     }
 }
 
@@ -222,19 +282,26 @@ struct TrackLaneView: View {
     let engine: SwiftEditorEngine
     let selectedTool: EditingTool
 
+    @State private var dropIndicatorX: CGFloat?
+
     var body: some View {
         ZStack(alignment: .leading) {
-            // Lane background
+            // Lane background — tap empty area to deselect all
             Rectangle()
                 .fill(isVideo
                       ? Color.blue.opacity(0.03)
                       : Color.green.opacity(0.03))
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    engine.timeline.selection = .empty
+                }
 
             // Clips
             ForEach(clips) { clip in
                 ClipView(
                     clip: clip,
                     pixelsPerSecond: pixelsPerSecond,
+                    trackHeight: trackHeight,
                     isVideo: isVideo,
                     isSelected: isClipSelected(clip.id),
                     selectedTool: selectedTool,
@@ -242,17 +309,133 @@ struct TrackLaneView: View {
                 )
                 .offset(x: CGFloat(clip.startTime.seconds) * pixelsPerSecond)
                 .onTapGesture {
-                    engine.timeline.selection = SelectionState(selectedClipIDs: [clip.id])
+                    if NSEvent.modifierFlags.contains(.shift) {
+                        // Shift+click: additive selection
+                        var ids = engine.timeline.selection.selectedClipIDs
+                        ids.insert(clip.id)
+                        engine.timeline.selection = SelectionState(selectedClipIDs: ids)
+                    } else if NSEvent.modifierFlags.contains(.command) {
+                        // Cmd+click: toggle selection
+                        var ids = engine.timeline.selection.selectedClipIDs
+                        if ids.contains(clip.id) {
+                            ids.remove(clip.id)
+                        } else {
+                            ids.insert(clip.id)
+                        }
+                        engine.timeline.selection = SelectionState(selectedClipIDs: ids)
+                    } else {
+                        // Plain click: exclusive selection
+                        engine.timeline.selection = SelectionState(selectedClipIDs: [clip.id])
+                    }
                 }
+            }
+
+            // Transition handles between adjacent clips
+            ForEach(adjacentClipPairs, id: \.0.id) { clipA, clipB in
+                TransitionHandleView(
+                    clipA: clipA,
+                    clipB: clipB,
+                    pixelsPerSecond: pixelsPerSecond,
+                    trackHeight: trackHeight,
+                    engine: engine
+                )
+            }
+
+            // Drop position indicator
+            if let x = dropIndicatorX {
+                Rectangle()
+                    .fill(Color.accentColor)
+                    .frame(width: 2, height: trackHeight)
+                    .offset(x: x)
+                    .allowsHitTesting(false)
             }
         }
         .overlay(alignment: .bottom) {
             Divider()
         }
+        .onDrop(of: [.mediaAssetTransfer], delegate: TrackLaneDropDelegate(
+            trackID: track,
+            pixelsPerSecond: pixelsPerSecond,
+            engine: engine,
+            dropIndicatorX: $dropIndicatorX
+        ))
     }
 
     private func isClipSelected(_ clipID: UUID) -> Bool {
         selection.selectedClipIDs.contains(clipID)
+    }
+
+    /// Pairs of adjacent (or nearly adjacent) clips on this track, sorted by start time.
+    private var adjacentClipPairs: [(ClipModel, ClipModel)] {
+        let sorted = clips.sorted { $0.startTime < $1.startTime }
+        guard sorted.count >= 2 else { return [] }
+        var pairs: [(ClipModel, ClipModel)] = []
+        for i in 0..<(sorted.count - 1) {
+            let a = sorted[i]
+            let b = sorted[i + 1]
+            let aEnd = a.startTime + a.duration
+            let gap = (b.startTime - aEnd).seconds
+            if gap < 0.1 {
+                pairs.append((a, b))
+            }
+        }
+        return pairs
+    }
+}
+
+// MARK: - Track Lane Drop Delegate
+
+/// Handles drag-and-drop of media assets onto a timeline track lane.
+/// Shows a vertical drop indicator during hover and performs an insert edit on drop.
+struct TrackLaneDropDelegate: DropDelegate {
+    let trackID: UUID
+    let pixelsPerSecond: CGFloat
+    let engine: SwiftEditorEngine
+    @Binding var dropIndicatorX: CGFloat?
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [.mediaAssetTransfer])
+    }
+
+    func dropEntered(info: DropInfo) {
+        dropIndicatorX = max(0, info.location.x)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        dropIndicatorX = max(0, info.location.x)
+        return DropProposal(operation: .copy)
+    }
+
+    func dropExited(info: DropInfo) {
+        dropIndicatorX = nil
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        dropIndicatorX = nil
+        let providers = info.itemProviders(for: [.mediaAssetTransfer])
+        guard let provider = providers.first else { return false }
+
+        let dropX = max(0, info.location.x)
+        let dropSeconds = Double(dropX) / Double(pixelsPerSecond)
+        let dropTime = Rational(seconds: dropSeconds)
+
+        provider.loadDataRepresentation(forTypeIdentifier: "com.swifteditor.mediaAssetTransfer") { data, _ in
+            guard let data,
+                  let transfer = try? JSONDecoder().decode(MediaAssetTransfer.self, from: data)
+            else { return }
+
+            let sourceOut = Rational(seconds: transfer.durationSeconds)
+            Task { @MainActor in
+                try? await engine.editing.insertEdit(
+                    sourceAssetID: transfer.assetID,
+                    trackID: trackID,
+                    at: dropTime,
+                    sourceIn: .zero,
+                    sourceOut: sourceOut
+                )
+            }
+        }
+        return true
     }
 }
 
@@ -261,6 +444,7 @@ struct TrackLaneView: View {
 struct ClipView: View {
     let clip: ClipModel
     let pixelsPerSecond: CGFloat
+    let trackHeight: CGFloat
     let isVideo: Bool
     let isSelected: Bool
     let selectedTool: EditingTool
@@ -277,6 +461,21 @@ struct ClipView: View {
                 .fill(clipColor)
                 .frame(width: width)
                 .padding(.vertical, 3)
+
+            // Thumbnail strip for video clips
+            if isVideo && width > 20 {
+                ThumbnailStripView(
+                    clip: clip,
+                    engine: engine,
+                    pixelsPerSecond: pixelsPerSecond,
+                    clipWidth: width,
+                    trackHeight: trackHeight
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .frame(width: width)
+                .padding(.vertical, 3)
+                .allowsHitTesting(false)
+            }
 
             // Selection border
             RoundedRectangle(cornerRadius: 4)
@@ -296,15 +495,21 @@ struct ClipView: View {
                         .lineLimit(1)
                 }
                 .foregroundStyle(.white.opacity(0.85))
+                .shadow(color: .black.opacity(0.6), radius: 1, x: 0, y: 1)
                 .frame(width: width - 16)
             }
 
-            // Audio waveform placeholder (for audio clips)
+            // Real waveform rendering for audio clips
             if !isVideo && width > 20 {
-                WaveformPlaceholder()
-                    .frame(width: width - 8)
-                    .padding(.vertical, 6)
-                    .allowsHitTesting(false)
+                WaveformView(
+                    clip: clip,
+                    engine: engine,
+                    pixelsPerSecond: pixelsPerSecond,
+                    clipWidth: width
+                )
+                .frame(width: width - 8)
+                .padding(.vertical, 6)
+                .allowsHitTesting(false)
             }
 
             // Speed indicator
@@ -334,9 +539,10 @@ struct ClipView: View {
         }
         .frame(width: width)
         .opacity(clip.isEnabled ? 1.0 : 0.4)
+        .shadow(color: isSelected ? (isVideo ? Color.blue : Color.green).opacity(0.5) : .clear, radius: 4)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(isVideo ? "Video" : "Audio") clip\(isSelected ? ", selected" : "")\(clip.isEnabled ? "" : ", disabled")")
-        .accessibilityHint("Tap to select this clip")
+        .accessibilityHint("Tap to select this clip. Shift+click to add to selection, Command+click to toggle")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
@@ -388,21 +594,326 @@ struct TrimHandleView: View {
     }
 }
 
-// MARK: - Audio Waveform Placeholder
+// MARK: - Real Waveform View
 
-struct WaveformPlaceholder: View {
+/// Displays actual waveform data from the audio engine, with caching.
+struct WaveformView: View {
+    let clip: ClipModel
+    let engine: SwiftEditorEngine
+    let pixelsPerSecond: CGFloat
+    let clipWidth: CGFloat
+
+    @State private var waveformData: WaveformData?
+    @State private var isLoading = false
+
     var body: some View {
         Canvas { context, size in
-            // Draw a simple simulated waveform
-            let midY = size.height / 2
-            let step: CGFloat = 3
-            var x: CGFloat = 0
-            while x < size.width {
-                let height = CGFloat.random(in: 2...(size.height * 0.8))
-                let rect = CGRect(x: x, y: midY - height / 2, width: 2, height: height)
-                context.fill(Path(rect), with: .color(.white.opacity(0.25)))
-                x += step
+            guard let data = waveformData, !data.samples.isEmpty else {
+                drawPlaceholder(context: context, size: size)
+                return
             }
+
+            let channel = data.samples[0]
+            guard !channel.isEmpty else { return }
+
+            let midY = size.height / 2
+            let clipDurationSeconds = clip.duration.seconds
+            guard clipDurationSeconds > 0 else { return }
+
+            let samplesPerPixel = Double(channel.count) / (clipDurationSeconds * Double(pixelsPerSecond))
+            let totalPixels = Int(size.width)
+
+            for px in 0..<totalPixels {
+                let startIdx = max(Int(Double(px) * samplesPerPixel), 0)
+                let endIdx = min(Int(Double(px + 1) * samplesPerPixel), channel.count)
+                guard startIdx < endIdx else { continue }
+
+                var minVal: Float = 1.0
+                var maxVal: Float = -1.0
+                for i in startIdx..<endIdx {
+                    let sample = channel[i]
+                    if sample.minValue < minVal { minVal = sample.minValue }
+                    if sample.maxValue > maxVal { maxVal = sample.maxValue }
+                }
+
+                let topY = midY - CGFloat(maxVal) * midY
+                let bottomY = midY - CGFloat(minVal) * midY
+                let barHeight = max(bottomY - topY, 1)
+
+                let rect = CGRect(x: CGFloat(px), y: topY, width: 1, height: barHeight)
+                context.fill(Path(rect), with: .color(.white.opacity(0.35)))
+            }
+        }
+        .task(id: WaveformTaskID(clipID: clip.id, pps: Int(pixelsPerSecond))) {
+            await loadWaveform()
+        }
+    }
+
+    private func drawPlaceholder(context: GraphicsContext, size: CGSize) {
+        let midY = size.height / 2
+        let rect = CGRect(x: 0, y: midY - 1, width: size.width, height: 2)
+        context.fill(Path(rect), with: .color(.white.opacity(0.15)))
+    }
+
+    private func loadWaveform() async {
+        guard !isLoading else { return }
+        isLoading = true
+        defer { isLoading = false }
+
+        guard let asset = engine.importedAsset(by: clip.sourceAssetID) else { return }
+
+        let samplesPerSec = max(10, Int(pixelsPerSecond))
+        do {
+            let data = try await engine.waveforms.generateWaveform(
+                for: asset.url,
+                samplesPerSecond: samplesPerSec
+            )
+            waveformData = data
+        } catch {
+            // Keep placeholder on failure
+        }
+    }
+}
+
+/// Identity for the waveform loading task so it re-fires on zoom changes.
+private struct WaveformTaskID: Equatable {
+    let clipID: UUID
+    let pps: Int
+}
+
+// MARK: - Thumbnail Strip View
+
+/// Displays a horizontal strip of video thumbnails across the clip width.
+struct ThumbnailStripView: View {
+    let clip: ClipModel
+    let engine: SwiftEditorEngine
+    let pixelsPerSecond: CGFloat
+    let clipWidth: CGFloat
+    let trackHeight: CGFloat
+
+    @State private var thumbnails: [Int: CGImage] = [:]
+    @State private var isLoading = false
+
+    private var thumbnailCount: Int {
+        let thumbWidth: CGFloat = 60
+        return max(1, Int(clipWidth / thumbWidth))
+    }
+
+    private var thumbWidth: CGFloat {
+        clipWidth / CGFloat(max(thumbnailCount, 1))
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(0..<thumbnailCount, id: \.self) { index in
+                if let cgImage = thumbnails[index] {
+                    Image(decorative: cgImage, scale: 1.0)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: thumbWidth, height: trackHeight - 6)
+                        .clipped()
+                } else {
+                    Rectangle()
+                        .fill(Color.blue.opacity(0.15))
+                        .frame(width: thumbWidth, height: trackHeight - 6)
+                }
+            }
+        }
+        .task(id: ThumbnailTaskID(clipID: clip.id, count: thumbnailCount)) {
+            await loadThumbnails()
+        }
+    }
+
+    private func loadThumbnails() async {
+        guard !isLoading else { return }
+        isLoading = true
+        defer { isLoading = false }
+
+        guard let asset = engine.importedAsset(by: clip.sourceAssetID) else { return }
+
+        let count = thumbnailCount
+        let thumbSize = CGSize(width: 120, height: 68)
+        let clipDuration = clip.duration.seconds
+        guard clipDuration > 0 else { return }
+
+        for i in 0..<count {
+            let timeFraction = Double(i) / Double(max(count, 1))
+            let timeSeconds = clip.sourceIn.seconds + timeFraction * clipDuration
+            let time = Rational(seconds: timeSeconds)
+
+            do {
+                let image = try await engine.media.generateThumbnail(
+                    for: asset.url,
+                    at: time,
+                    size: thumbSize
+                )
+                thumbnails[i] = image
+            } catch {
+                // Skip failed thumbnails — slot remains a placeholder
+            }
+        }
+    }
+}
+
+/// Identity for the thumbnail loading task so it re-fires when zoom changes thumbnail count.
+private struct ThumbnailTaskID: Equatable {
+    let clipID: UUID
+    let count: Int
+}
+
+// MARK: - Transition Handle View
+
+/// A diamond handle at the edit point between two adjacent clips.
+struct TransitionHandleView: View {
+    let clipA: ClipModel
+    let clipB: ClipModel
+    let pixelsPerSecond: CGFloat
+    let trackHeight: CGFloat
+    let engine: SwiftEditorEngine
+
+    @State private var isHovered = false
+    @State private var isDragging = false
+    @State private var dragOffset: CGFloat = 0
+
+    private var editPointX: CGFloat {
+        let aEnd = clipA.startTime + clipA.duration
+        return CGFloat(aEnd.seconds) * pixelsPerSecond
+    }
+
+    private var existingTransition: TransitionInstance? {
+        engine.transitions.transition(between: clipA.id, and: clipB.id)
+    }
+
+    private var transitionWidth: CGFloat {
+        if let t = existingTransition {
+            return CGFloat(t.duration.seconds) * pixelsPerSecond
+        }
+        return 0
+    }
+
+    var body: some View {
+        ZStack {
+            // Transition region overlay (if a transition exists)
+            if let transition = existingTransition {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(transitionColor(for: transition.type).opacity(0.3))
+                    .frame(
+                        width: max(transitionWidth + dragOffset, 4),
+                        height: trackHeight - 10
+                    )
+                    .overlay {
+                        if isHovered {
+                            Text(transitionLabel(for: transition.type))
+                                .font(.system(size: 7))
+                                .foregroundStyle(.white.opacity(0.8))
+                        }
+                    }
+                    .offset(x: editPointX - transitionWidth / 2)
+            }
+
+            // Diamond handle at edit point
+            Image(systemName: existingTransition != nil ? "diamond.fill" : "diamond")
+                .font(.system(size: 10))
+                .foregroundStyle(handleColor)
+                .offset(x: editPointX)
+                .onHover { hovering in
+                    isHovered = hovering
+                }
+                .gesture(transitionDragGesture)
+                .onTapGesture(count: 2) {
+                    openTransitionEditor()
+                }
+                .help(transitionHelpText)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Edit point\(existingTransition != nil ? " with transition" : "")")
+                .accessibilityHint("Double-click to open transition editor, drag to adjust duration")
+        }
+    }
+
+    private var handleColor: Color {
+        if isDragging { return .yellow }
+        if isHovered { return .white }
+        if existingTransition != nil { return .orange }
+        return .white.opacity(0.5)
+    }
+
+    private var transitionHelpText: String {
+        if let t = existingTransition {
+            return "\(transitionLabel(for: t.type)) (\(String(format: "%.2fs", t.duration.seconds)))"
+        }
+        return "Edit point — double-click to add transition"
+    }
+
+    private var transitionDragGesture: some Gesture {
+        DragGesture(minimumDistance: 2)
+            .onChanged { value in
+                isDragging = true
+                dragOffset = value.translation.width
+            }
+            .onEnded { value in
+                isDragging = false
+                let deltaSeconds = Double(value.translation.width) / Double(pixelsPerSecond)
+                if let transition = existingTransition {
+                    let newDuration = max(0.0, transition.duration.seconds + deltaSeconds)
+                    let newRational = Rational(seconds: newDuration)
+                    Task {
+                        try? await engine.transitions.removeTransition(transitionID: transition.id)
+                        try? await engine.transitions.addTransition(
+                            clipAID: clipA.id,
+                            clipBID: clipB.id,
+                            type: transitionTypeString(transition.type),
+                            duration: newRational
+                        )
+                    }
+                }
+                dragOffset = 0
+            }
+    }
+
+    private func openTransitionEditor() {
+        if existingTransition == nil {
+            let defaultDuration = Rational(seconds: 1.0)
+            Task {
+                try? await engine.transitions.addTransition(
+                    clipAID: clipA.id,
+                    clipBID: clipB.id,
+                    type: "crossDissolve",
+                    duration: defaultDuration
+                )
+            }
+        }
+    }
+
+    private func transitionColor(for type: TransitionType) -> Color {
+        switch type {
+        case .crossDissolve: return .orange
+        case .dipToBlack: return .gray
+        case .dipToWhite: return .white
+        case .wipe: return .cyan
+        case .push: return .purple
+        case .slide: return .mint
+        }
+    }
+
+    private func transitionLabel(for type: TransitionType) -> String {
+        switch type {
+        case .crossDissolve: return "Dissolve"
+        case .dipToBlack: return "Dip Black"
+        case .dipToWhite: return "Dip White"
+        case .wipe: return "Wipe"
+        case .push: return "Push"
+        case .slide: return "Slide"
+        }
+    }
+
+    private func transitionTypeString(_ type: TransitionType) -> String {
+        switch type {
+        case .crossDissolve: return "crossDissolve"
+        case .dipToBlack: return "dipToBlack"
+        case .dipToWhite: return "dipToWhite"
+        case .wipe: return "wipe"
+        case .push: return "push"
+        case .slide: return "slide"
         }
     }
 }
@@ -483,7 +994,7 @@ struct TimelineRulerView: View {
                 t += interval.minor
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .liquidGlassRuler()
         .overlay(alignment: .bottom) {
             Divider()
         }
@@ -539,5 +1050,58 @@ struct PlayheadView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Playhead")
         .accessibilityHint("Indicates the current playback position on the timeline")
+    }
+}
+
+// MARK: - Subtitle Track Lane
+
+struct SubtitleTrackLaneView: View {
+    let track: SubtitleTrackModel
+    let pixelsPerSecond: CGFloat
+    let trackHeight: CGFloat
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            // Lane background
+            Rectangle()
+                .fill(Color.yellow.opacity(0.03))
+
+            // Subtitle cue blocks
+            ForEach(track.sortedCues) { cue in
+                SubtitleCueView(cue: cue, pixelsPerSecond: pixelsPerSecond)
+                    .frame(height: trackHeight - 6)
+                    .offset(x: CGFloat(cue.startTime.seconds) * pixelsPerSecond, y: 0)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+    }
+}
+
+struct SubtitleCueView: View {
+    let cue: SubtitleCue
+    let pixelsPerSecond: CGFloat
+
+    var body: some View {
+        let width = max(CGFloat(cue.duration.seconds) * pixelsPerSecond, 8)
+
+        RoundedRectangle(cornerRadius: 4)
+            .fill(Color.yellow.opacity(0.6))
+            .frame(width: width)
+            .overlay {
+                if width > 40 {
+                    Text(cue.text)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.black.opacity(0.8))
+                        .lineLimit(2)
+                        .padding(.horizontal, 4)
+                        .frame(width: width)
+                }
+            }
+            .padding(.vertical, 3)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Subtitle: \(cue.text)")
+            .accessibilityHint("Subtitle cue on the timeline")
     }
 }

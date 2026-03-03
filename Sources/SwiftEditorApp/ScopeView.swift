@@ -1,15 +1,22 @@
 import SwiftUI
 import SwiftEditorAPI
 import RenderEngine
+import CoreGraphics
 
 /// Displays video scopes (histogram, waveform, RGB parade, vectorscope).
-/// Used in the Color workspace.
+/// Uses Metal-computed scope data from ScopeDataProvider when available,
+/// falling back to placeholder visualization.
 struct ScopeView: View {
     let engine: SwiftEditorEngine
 
     @State private var selectedScope: ScopeConfiguration.ScopeType = .waveform
     @State private var showGraticule = true
     @State private var showSkinTone = false
+
+    /// Uses the engine's shared scope data provider for real frame analysis.
+    private var scopeProvider: ScopeDataProvider {
+        engine.scopeDataProvider
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -42,8 +49,20 @@ struct ScopeView: View {
             ZStack {
                 Color(nsColor: NSColor(red: 0.05, green: 0.05, blue: 0.05, alpha: 1))
 
-                // Placeholder visualization — in production this wraps a Metal-rendered scope texture
-                ScopePlaceholderView(scopeType: selectedScope)
+                if let pixels = scopeProvider.pixels(for: selectedScope) {
+                    let size = scopeProvider.outputSize(for: selectedScope)
+                    ScopeTextureView(
+                        pixels: pixels,
+                        textureWidth: size.width,
+                        textureHeight: size.height
+                    )
+                    .accessibilityLabel("\(selectedScope.displayName) scope display")
+                    .accessibilityHint("Shows the \(selectedScope.displayName.lowercased()) analysis of the current frame")
+                } else {
+                    ScopePlaceholderView(scopeType: selectedScope)
+                        .accessibilityLabel("\(selectedScope.displayName) scope placeholder")
+                        .accessibilityHint("Placeholder shown when no frame data is available")
+                }
             }
             .aspectRatio(selectedScope == .vectorscope ? 1.0 : 2.0, contentMode: .fit)
 
@@ -69,10 +88,63 @@ struct ScopeView: View {
             .padding(.vertical, 4)
             .background(.bar)
         }
+        .onChange(of: showGraticule) { _, newValue in
+            scopeProvider.configuration.showGraticule = newValue
+        }
+        .onChange(of: showSkinTone) { _, newValue in
+            scopeProvider.configuration.showSkinToneLine = newValue
+        }
     }
 }
 
-/// Placeholder visualization for scopes before Metal integration.
+// MARK: - ScopeTextureView
+
+/// Renders scope pixel data as a bitmap image in a SwiftUI view.
+struct ScopeTextureView: View {
+    let pixels: [UInt8]
+    let textureWidth: Int
+    let textureHeight: Int
+
+    var body: some View {
+        if let image = makeImage() {
+            Image(nsImage: image)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
+        }
+    }
+
+    private func makeImage() -> NSImage? {
+        let bytesPerRow = textureWidth * 4
+        guard pixels.count == textureHeight * bytesPerRow else { return nil }
+
+        // BGRA -> need to convert to RGBA for CGImage, or use BGRA with proper format
+        guard let provider = CGDataProvider(data: Data(pixels) as CFData) else { return nil }
+
+        // Metal outputs BGRA; CGImage can handle this with the right bitmapInfo
+        let bitmapInfo = CGBitmapInfo(rawValue: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue)
+
+        guard let cgImage = CGImage(
+            width: textureWidth,
+            height: textureHeight,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: bytesPerRow,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: bitmapInfo,
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: true,
+            intent: .defaultIntent
+        ) else { return nil }
+
+        return NSImage(cgImage: cgImage, size: NSSize(width: textureWidth, height: textureHeight))
+    }
+}
+
+// MARK: - ScopePlaceholderView
+
+/// Placeholder visualization for scopes before Metal data is available.
 struct ScopePlaceholderView: View {
     let scopeType: ScopeConfiguration.ScopeType
 
@@ -97,7 +169,6 @@ struct ScopePlaceholderView: View {
             let x = CGFloat(i) / CGFloat(bins) * size.width
             let w = size.width / CGFloat(bins)
 
-            // Simulated bell-curve distribution
             let center = Double(bins) / 2.0
             let dist = abs(Double(i) - center) / center
             let heightFrac = exp(-dist * dist * 3) * 0.8 + 0.05
@@ -118,7 +189,6 @@ struct ScopePlaceholderView: View {
     }
 
     private func drawWaveform(context: GraphicsContext, size: CGSize) {
-        // Simulated waveform scatter
         for col in stride(from: 0.0, to: size.width, by: 2) {
             let x = col / size.width
             let midY = 0.4 + sin(x * .pi * 4) * 0.15
@@ -150,7 +220,6 @@ struct ScopePlaceholderView: View {
                 }
             }
 
-            // Separator lines
             if index > 0 {
                 let sepX = CGFloat(index) * thirdW
                 let line = Path { p in
@@ -166,14 +235,12 @@ struct ScopePlaceholderView: View {
         let center = CGPoint(x: size.width / 2, y: size.height / 2)
         let radius = min(size.width, size.height) / 2 - 4
 
-        // Circle outline
         let circle = Path(ellipseIn: CGRect(
             x: center.x - radius, y: center.y - radius,
             width: radius * 2, height: radius * 2
         ))
         context.stroke(circle, with: .color(.gray.opacity(0.3)), lineWidth: 0.5)
 
-        // Crosshairs
         let hLine = Path { p in
             p.move(to: CGPoint(x: center.x - radius, y: center.y))
             p.addLine(to: CGPoint(x: center.x + radius, y: center.y))
@@ -185,7 +252,6 @@ struct ScopePlaceholderView: View {
         context.stroke(hLine, with: .color(.gray.opacity(0.15)), lineWidth: 0.5)
         context.stroke(vLine, with: .color(.gray.opacity(0.15)), lineWidth: 0.5)
 
-        // Simulated data cluster near center
         for _ in 0..<200 {
             let angle = Double.random(in: 0...(2 * .pi))
             let dist = Double.random(in: 0...0.3) * radius

@@ -120,6 +120,21 @@ public final class ViewerAPI: @unchecked Sendable {
         sourceViewer.sourceAssetID
     }
 
+    /// The URL of the asset currently loaded in the source viewer.
+    public var sourceAssetURL: URL? {
+        sourceViewer.sourceAssetURL
+    }
+
+    /// The source viewer's in point.
+    public var sourceInPoint: Rational? {
+        sourceViewer.inOutPoints.inPoint
+    }
+
+    /// The source viewer's out point.
+    public var sourceOutPoint: Rational? {
+        sourceViewer.inOutPoints.outPoint
+    }
+
     /// Set in point on the source viewer's in/out model.
     public func setSourceInPoint(_ time: Rational) {
         sourceViewer.inOutPoints.setIn(time)

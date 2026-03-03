@@ -88,6 +88,19 @@ public final class AudioEffectsAPI: @unchecked Sendable {
         AudioEffectPreset.builtIn
     }
 
+    /// List all built-in audio effects.
+    public var builtInAudioEffects: [BuiltInAudioEffectDescriptor] {
+        BuiltInAudioEffects.all
+    }
+
+    /// Add a built-in audio effect to a track by descriptor ID. Returns the new effect's ID.
+    @discardableResult
+    public func addBuiltInEffect(trackID: UUID, descriptorID: String) -> UUID? {
+        guard let instance = BuiltInAudioEffects.createInstance(for: descriptorID) else { return nil }
+        chain(for: trackID).append(instance)
+        return instance.id
+    }
+
     // MARK: - Audio Unit Management
 
     /// Build AVAudioUnit nodes for all effects in a track's chain.

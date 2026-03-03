@@ -14,6 +14,12 @@ public final class TimelineModel: @unchecked Sendable {
     public private(set) var duration: Rational = .zero
     public var selection: SelectionState = .empty
 
+    // Compound, multicam, and subtitle storage — stored directly to avoid
+    // ObjectIdentifier-keyed static dictionary crashes with @Observable.
+    public var compoundClips: [UUID: CompoundClipModel] = [:]
+    public var multicamClips: [UUID: MulticamClipModel] = [:]
+    public var subtitleTracks: [SubtitleTrackModel] = []
+
     // MARK: - Subsystems
 
     public let undoManager = TimelineUndoManager()
@@ -50,7 +56,8 @@ public final class TimelineModel: @unchecked Sendable {
                          sourceIn: clip.sourceIn,
                          sourceOut: clip.sourceOut,
                          speed: Rational(Int64(clip.speed * 1000), 1000),
-                         isEnabled: clip.isEnabled)
+                         isEnabled: clip.isEnabled,
+                         speedRamp: clip.speedRamp)
             }
             allTrackData.append(td)
         }
@@ -65,7 +72,8 @@ public final class TimelineModel: @unchecked Sendable {
                          sourceIn: clip.sourceIn,
                          sourceOut: clip.sourceOut,
                          speed: Rational(Int64(clip.speed * 1000), 1000),
-                         isEnabled: clip.isEnabled)
+                         isEnabled: clip.isEnabled,
+                         speedRamp: clip.speedRamp)
             }
             allTrackData.append(td)
         }
@@ -422,6 +430,7 @@ public final class TimelineModel: @unchecked Sendable {
                 )
                 clip.speed = clipData.speed.seconds
                 clip.isEnabled = clipData.isEnabled
+                clip.speedRamp = clipData.speedRamp
                 allClips[clip.id] = clip
             }
         }

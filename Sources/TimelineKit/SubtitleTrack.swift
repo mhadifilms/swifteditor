@@ -133,13 +133,7 @@ public final class SubtitleTrackModel: Identifiable, @unchecked Sendable {
 
 extension TimelineModel {
 
-    /// Storage for subtitle tracks.
-    nonisolated(unsafe) private static var _subtitleTracks: [ObjectIdentifier: [SubtitleTrackModel]] = [:]
-
-    public var subtitleTracks: [SubtitleTrackModel] {
-        get { Self._subtitleTracks[ObjectIdentifier(self)] ?? [] }
-        set { Self._subtitleTracks[ObjectIdentifier(self)] = newValue }
-    }
+    // subtitleTracks is now a stored property on TimelineModel
 
     /// Add a subtitle track.
     @discardableResult

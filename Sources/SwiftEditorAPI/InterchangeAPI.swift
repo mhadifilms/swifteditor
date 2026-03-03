@@ -48,6 +48,40 @@ public final class InterchangeAPI: @unchecked Sendable {
         return try importer.parse(data: data)
     }
 
+    /// Import FCPXML and convert to a Project model.
+    public func importFCPXMLToProject(xmlString: String) throws -> Project {
+        let imported = try importFCPXML(xmlString: xmlString)
+        return imported.toProject()
+    }
+
+    /// Import FCPXML from a file and convert to a Project model.
+    public func importFCPXMLFileToProject(url: URL) throws -> Project {
+        let imported = try importFCPXMLFromFile(url: url)
+        return imported.toProject()
+    }
+
+    /// Import FCPXML and load the first sequence into the timeline.
+    /// Returns the reconstructed Project.
+    @discardableResult
+    public func importFCPXMLAndLoad(xmlString: String) throws -> Project {
+        let project = try importFCPXMLToProject(xmlString: xmlString)
+        if let sequence = project.sequences.first {
+            timeline.load(from: sequence)
+        }
+        return project
+    }
+
+    /// Import FCPXML from a file and load the first sequence into the timeline.
+    /// Returns the reconstructed Project.
+    @discardableResult
+    public func importFCPXMLFileAndLoad(url: URL) throws -> Project {
+        let project = try importFCPXMLFileToProject(url: url)
+        if let sequence = project.sequences.first {
+            timeline.load(from: sequence)
+        }
+        return project
+    }
+
     // MARK: - EDL Export
 
     /// Export the current timeline as a CMX3600 EDL string.

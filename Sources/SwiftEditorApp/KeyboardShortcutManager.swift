@@ -27,6 +27,9 @@ enum ActionID: String, CaseIterable, Identifiable, Sendable {
     case stepBackward = "playback.stepBackward"
     case goToStart = "playback.goToStart"
     case goToEnd = "playback.goToEnd"
+    case shuttleReverse = "playback.shuttleReverse"
+    case shuttleStop = "playback.shuttleStop"
+    case shuttleForward = "playback.shuttleForward"
 
     // Tools
     case selectionTool = "tool.selection"
@@ -84,6 +87,9 @@ enum ActionID: String, CaseIterable, Identifiable, Sendable {
         case .stepBackward: return "Step Backward"
         case .goToStart: return "Go to Start"
         case .goToEnd: return "Go to End"
+        case .shuttleReverse: return "Shuttle Reverse (J)"
+        case .shuttleStop: return "Shuttle Stop (K)"
+        case .shuttleForward: return "Shuttle Forward (L)"
         case .selectionTool: return "Selection Tool"
         case .trimTool: return "Trim Tool"
         case .bladeTool: return "Blade Tool"
@@ -208,6 +214,9 @@ enum NLEPreset: String, CaseIterable, Identifiable, Sendable {
         .stepBackward:      KeyCombo(key: "left", modifiers: .none),
         .goToStart:         KeyCombo(key: "home", modifiers: .none),
         .goToEnd:           KeyCombo(key: "end", modifiers: .none),
+        .shuttleReverse:    KeyCombo(key: "j", modifiers: .none),
+        .shuttleStop:       KeyCombo(key: "k", modifiers: .none),
+        .shuttleForward:    KeyCombo(key: "l", modifiers: .none),
         .selectionTool:     KeyCombo(key: "a", modifiers: .none),
         .trimTool:          KeyCombo(key: "t", modifiers: .none),
         .bladeTool:         KeyCombo(key: "b", modifiers: .none),
@@ -251,6 +260,9 @@ enum NLEPreset: String, CaseIterable, Identifiable, Sendable {
         .stepBackward:      KeyCombo(key: "left", modifiers: .none),
         .goToStart:         KeyCombo(key: "home", modifiers: .none),
         .goToEnd:           KeyCombo(key: "end", modifiers: .none),
+        .shuttleReverse:    KeyCombo(key: "j", modifiers: .none),
+        .shuttleStop:       KeyCombo(key: "k", modifiers: .none),
+        .shuttleForward:    KeyCombo(key: "l", modifiers: .none),
         .selectionTool:     KeyCombo(key: "v", modifiers: .none),
         .trimTool:          KeyCombo(key: "t", modifiers: .none),
         .bladeTool:         KeyCombo(key: "c", modifiers: .none),
@@ -289,11 +301,14 @@ enum NLEPreset: String, CaseIterable, Identifiable, Sendable {
         .delete:            KeyCombo(key: "delete", modifiers: .none),
         .rippleDelete:      KeyCombo(key: "delete", modifiers: .shift),
         .playPause:         KeyCombo(key: "space", modifiers: .none),
-        .stop:              KeyCombo(key: "k", modifiers: .none),
+        .stop:              KeyCombo(key: "escape", modifiers: .none),
         .stepForward:       KeyCombo(key: "right", modifiers: .none),
         .stepBackward:      KeyCombo(key: "left", modifiers: .none),
         .goToStart:         KeyCombo(key: "home", modifiers: .none),
         .goToEnd:           KeyCombo(key: "end", modifiers: .none),
+        .shuttleReverse:    KeyCombo(key: "j", modifiers: .none),
+        .shuttleStop:       KeyCombo(key: "k", modifiers: .none),
+        .shuttleForward:    KeyCombo(key: "l", modifiers: .none),
         .selectionTool:     KeyCombo(key: "a", modifiers: .none),
         .trimTool:          KeyCombo(key: "t", modifiers: .none),
         .bladeTool:         KeyCombo(key: "b", modifiers: .none),

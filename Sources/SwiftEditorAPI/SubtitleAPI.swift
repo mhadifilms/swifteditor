@@ -103,6 +103,55 @@ public final class SubtitleAPI: @unchecked Sendable {
         return try await dispatcher.dispatch(command)
     }
 
+    // MARK: - SRT Import/Export
+
+    private let srtManager = SRTManager()
+
+    /// Import subtitles from an SRT file into a track.
+    /// Creates a new track if trackID is nil, or adds to an existing track.
+    @discardableResult
+    public func importSRT(from url: URL, trackID: UUID? = nil) async throws -> UUID {
+        let cues = try srtManager.importSRT(from: url)
+
+        let targetTrackID: UUID
+        if let existing = trackID {
+            targetTrackID = existing
+        } else {
+            let name = url.deletingPathExtension().lastPathComponent
+            _ = try await addSubtitleTrack(name: name)
+            // The track was created; find the newest track ID
+            targetTrackID = timeline.subtitleTracks.last?.id ?? UUID()
+        }
+
+        for cue in cues {
+            _ = try await addSubtitleCue(
+                trackID: targetTrackID,
+                text: cue.text,
+                startTime: cue.startTime,
+                endTime: cue.endTime,
+                style: cue.style
+            )
+        }
+
+        return targetTrackID
+    }
+
+    /// Export a subtitle track to SRT format.
+    public func exportSRT(trackID: UUID, to url: URL) throws {
+        guard let track = timeline.subtitleTracks.first(where: { $0.id == trackID }) else {
+            return
+        }
+        try srtManager.exportSRT(cues: track.sortedCues, to: url)
+    }
+
+    /// Format a subtitle track as an SRT string.
+    public func formatSRT(trackID: UUID) -> String {
+        guard let track = timeline.subtitleTracks.first(where: { $0.id == trackID }) else {
+            return ""
+        }
+        return srtManager.formatSRT(track.sortedCues)
+    }
+
     // MARK: - Query
 
     /// All subtitle tracks on the timeline.

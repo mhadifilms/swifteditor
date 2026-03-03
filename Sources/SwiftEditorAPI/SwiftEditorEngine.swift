@@ -79,6 +79,10 @@ public final class SwiftEditorEngine: @unchecked Sendable {
 
     public let effectStacks: EffectStackStore
 
+    // MARK: - Scope Analysis
+
+    public let scopeDataProvider: ScopeDataProvider
+
     // MARK: - Internal Services
 
     private let projectBox: ProjectBox
@@ -105,6 +109,15 @@ public final class SwiftEditorEngine: @unchecked Sendable {
 
         // Create effect stack store
         self.effectStacks = EffectStackStore()
+
+        // Create scope data provider for video scopes
+        self.scopeDataProvider = ScopeDataProvider(configuration: ScopeConfiguration(
+            outputWidth: 512,
+            outputHeight: 256,
+            brightness: 1.2,
+            showGraticule: true,
+            vectorscopeSize: 256
+        ))
 
         // ── Core Facade APIs ──────────────────────────
         self.editing = EditingAPI(dispatcher: dispatcher, timeline: timeline)
@@ -154,7 +167,7 @@ public final class SwiftEditorEngine: @unchecked Sendable {
         self.proxy = ProxyAPI()
         self.interchange = InterchangeAPI(timeline: timeline)
         self.aiFeatures = AIFeaturesAPI()
-        self.collaboration = CollaborationAPI()
+        self.collaboration = CollaborationAPI(timeline: timeline)
         self.plugins = PluginAPI()
         self.renderConfig = RenderConfigAPI()
         // Capture timeline and transport directly to avoid self-before-init issue
@@ -170,6 +183,12 @@ public final class SwiftEditorEngine: @unchecked Sendable {
                 )
             }
         )
+
+        // Wire proxy URL resolver into the composition builder
+        let proxyManager = proxy.manager
+        compositionBuilder.urlResolver = { @Sendable url in
+            await proxyManager.resolveURL(url)
+        }
 
         // Load initial sequence
         if let firstSequence = project.sequences.first {
@@ -227,14 +246,18 @@ public final class SwiftEditorEngine: @unchecked Sendable {
             }
         ))
 
-        // Export handler
+        // Export handler — wire progress reporting through ExportAPI
         let stacks = effectStacks
+        let exportAPI = self.export
         await dispatcher.register(ExportHandler(
             compositionBuilder: compositionBuilder,
             timelineProvider: { [weak self] in self?.timeline ?? TimelineModel() },
             assetResolver: { [weak self] assetID in self?.assetCache[assetID] },
             effectStackResolver: { clipID in
                 stacks.hasEffects(for: clipID) ? stacks.stack(for: clipID) : nil
+            },
+            onProgress: { @Sendable progress in
+                exportAPI.reportProgress(progress)
             }
         ))
 

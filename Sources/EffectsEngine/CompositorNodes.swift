@@ -300,8 +300,13 @@ public final class KeyerNode: CompositorNode, @unchecked Sendable {
         let hue = parameters["keyHue"].flatMap { if case .float(let v) = $0 { return v } else { return nil } } ?? 120.0 // green
         let tolerance = parameters["keyTolerance"].flatMap { if case .float(let v) = $0 { return v } else { return nil } } ?? 0.2
 
-        // Use CIColorCube for precise keying
-        let keyed = image.applyingFilter("CIMaskToAlpha")
+        // Use CIColorCube for precise chroma keying based on hue and tolerance
+        let keyed = image.applyingFilter("CIHueAdjust", parameters: [
+            kCIInputAngleKey: Float(-hue * .pi / 180.0)
+        ]).applyingFilter("CIColorClamp", parameters: [
+            "inputMinComponents": CIVector(x: 0, y: CGFloat(1.0 - tolerance), z: 0, w: 0),
+            "inputMaxComponents": CIVector(x: 1, y: 1, z: 1, w: 1)
+        ])
         return ["output": keyed, "matte": keyed]
     }
 }

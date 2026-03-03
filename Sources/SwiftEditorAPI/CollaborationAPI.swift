@@ -1,14 +1,50 @@
 import Foundation
 import CollaborationKit
+import TimelineKit
 
 /// Facade for real-time collaboration sessions.
 public final class CollaborationAPI: @unchecked Sendable {
 
-    public init() {}
+    private let timeline: TimelineModel?
+
+    /// The active collaboration bridge, if a session is running.
+    public private(set) var bridge: CollaborationBridge?
+
+    /// The active sync session, if connected.
+    public private(set) var activeSession: SyncSession?
+
+    public init(timeline: TimelineModel? = nil) {
+        self.timeline = timeline
+    }
 
     /// Create a new sync session with a unique site ID.
     public func createSession() -> SyncSession {
         SyncSession()
+    }
+
+    /// Start a collaboration session: creates a bridge, connects to the server,
+    /// and begins syncing local/remote operations.
+    public func startSession(host: String, port: UInt16) async -> SyncSession? {
+        guard let timeline else { return nil }
+
+        let session = SyncSession()
+        let newBridge = CollaborationBridge(timeline: timeline, session: session)
+        await newBridge.start()
+        await session.connect(host: host, port: port)
+
+        self.activeSession = session
+        self.bridge = newBridge
+        return session
+    }
+
+    /// Stop the active collaboration session.
+    public func stopSession() async {
+        bridge?.stop()
+        if let session = activeSession {
+            await session.disconnect()
+        }
+        bridge = nil
+        activeSession = nil
     }
 
     /// Connect a session to a collaboration server.

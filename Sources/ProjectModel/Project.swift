@@ -140,9 +140,14 @@ public struct ClipData: Codable, Sendable, Identifiable {
     public var position: SIMD2<Double>
     public var scale: SIMD2<Double>
     public var rotation: Double
+    /// Optional speed ramp for variable speed effects.
+    public var speedRamp: TimeRemapCurve?
 
-    /// The duration of this clip on the timeline, accounting for speed.
+    /// The duration of this clip on the timeline, accounting for speed ramp or scalar speed.
     public var duration: Rational {
+        if let ramp = speedRamp, let outDuration = ramp.outputDuration {
+            return Rational(seconds: outDuration)
+        }
         guard speed.isValid, speed != .zero else { return sourceOut - sourceIn }
         return (sourceOut - sourceIn) / speed
     }
@@ -160,7 +165,8 @@ public struct ClipData: Codable, Sendable, Identifiable {
         opacity: Double = 1.0,
         position: SIMD2<Double> = .zero,
         scale: SIMD2<Double> = SIMD2(1.0, 1.0),
-        rotation: Double = 0.0
+        rotation: Double = 0.0,
+        speedRamp: TimeRemapCurve? = nil
     ) {
         self.id = id
         self.sourceAssetID = sourceAssetID
@@ -175,6 +181,7 @@ public struct ClipData: Codable, Sendable, Identifiable {
         self.position = position
         self.scale = scale
         self.rotation = rotation
+        self.speedRamp = speedRamp
     }
 }
 

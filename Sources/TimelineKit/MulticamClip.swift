@@ -90,13 +90,7 @@ public final class MulticamClipModel: @unchecked Sendable {
 
 extension TimelineModel {
 
-    /// Registry of multicam clips associated with this timeline.
-    nonisolated(unsafe) private static var _multicamClips: [ObjectIdentifier: [UUID: MulticamClipModel]] = [:]
-
-    public var multicamClips: [UUID: MulticamClipModel] {
-        get { Self._multicamClips[ObjectIdentifier(self)] ?? [:] }
-        set { Self._multicamClips[ObjectIdentifier(self)] = newValue }
-    }
+    // multicamClips is now a stored property on TimelineModel
 
     /// Create a multicam clip from multiple sources.
     @discardableResult

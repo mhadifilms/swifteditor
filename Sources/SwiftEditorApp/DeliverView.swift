@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftEditorAPI
 import CoreMediaPlus
+import CommandBus
 
 /// Export/deliver panel for rendering the timeline to a file.
 /// Shown in the Deliver workspace.
@@ -11,8 +12,12 @@ struct DeliverView: View {
     @State private var selectedResolution: ExportResolution = .r1080p
     @State private var selectedFrameRate: ExportFrameRate = .fps24
     @State private var outputPath: String = "~/Desktop/export.mp4"
-    @State private var isExporting = false
-    @State private var exportProgress: Double = 0
+    @State private var exportError: String?
+    @State private var exportComplete = false
+    @State private var exportTask: Task<Void, Never>?
+
+    private var isExporting: Bool { engine.export.isExporting }
+    private var exportProgress: Double { Double(engine.export.progress) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -38,6 +43,8 @@ struct DeliverView: View {
                                 }
                             }
                             .pickerStyle(.menu)
+                            .accessibilityLabel("Export codec")
+                            .accessibilityValue(selectedFormat.displayName)
 
                             Picker("Resolution", selection: $selectedResolution) {
                                 ForEach(ExportResolution.allCases) { res in
@@ -45,6 +52,8 @@ struct DeliverView: View {
                                 }
                             }
                             .pickerStyle(.menu)
+                            .accessibilityLabel("Export resolution")
+                            .accessibilityValue(selectedResolution.displayName)
 
                             Picker("Frame Rate", selection: $selectedFrameRate) {
                                 ForEach(ExportFrameRate.allCases) { fps in
@@ -52,6 +61,8 @@ struct DeliverView: View {
                                 }
                             }
                             .pickerStyle(.menu)
+                            .accessibilityLabel("Export frame rate")
+                            .accessibilityValue(selectedFrameRate.displayName)
                         }
                     }
 
@@ -64,7 +75,7 @@ struct DeliverView: View {
                                     .font(.caption)
 
                                 Button("Browse...") {
-                                    // Open NSSavePanel
+                                    browseOutputLocation()
                                 }
                                 .font(.caption)
                                 .accessibilityLabel("Browse output location")
@@ -89,7 +100,7 @@ struct DeliverView: View {
                         }
                     }
 
-                    // Export button
+                    // Export status
                     if isExporting {
                         VStack(spacing: 8) {
                             ProgressView(value: exportProgress) {
@@ -97,22 +108,62 @@ struct DeliverView: View {
                                     .font(.caption)
                             }
                             .progressViewStyle(.linear)
+                            .accessibilityLabel("Export progress")
+                            .accessibilityValue("\(Int(exportProgress * 100)) percent")
 
                             Text("\(Int(exportProgress * 100))%")
                                 .font(.caption.monospaced())
                                 .foregroundStyle(.secondary)
+                                .accessibilityHidden(true)
 
                             Button("Cancel") {
-                                isExporting = false
-                                exportProgress = 0
+                                cancelExport()
                             }
                             .font(.caption)
                             .accessibilityLabel("Cancel export")
                             .accessibilityHint("Stop the current export operation")
                         }
+                    } else if exportComplete {
+                        VStack(spacing: 8) {
+                            HStack {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                                    .accessibilityHidden(true)
+                                Text("Export Complete")
+                                    .font(.caption)
+                            }
+                            Button("Reveal in Finder") {
+                                let url = resolveOutputURL()
+                                NSWorkspace.shared.selectFile(url.path, inFileViewerRootedAtPath: "")
+                                exportComplete = false
+                            }
+                            .font(.caption)
+                            .accessibilityLabel("Reveal in Finder")
+                            .accessibilityHint("Open the exported file location in Finder")
+                        }
+                    } else if let error = exportError {
+                        VStack(spacing: 8) {
+                            HStack {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.red)
+                                    .accessibilityHidden(true)
+                                Text("Export Failed")
+                                    .font(.caption)
+                            }
+                            Text(error)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(3)
+                            Button("Dismiss") {
+                                exportError = nil
+                            }
+                            .font(.caption)
+                            .accessibilityLabel("Dismiss error")
+                            .accessibilityHint("Clear the export error message")
+                        }
                     } else {
                         Button {
-                            isExporting = true
+                            startExport()
                         } label: {
                             HStack {
                                 Image(systemName: "arrow.up.doc")
@@ -129,6 +180,68 @@ struct DeliverView: View {
                 }
                 .padding(12)
             }
+        }
+    }
+
+    // MARK: - Export Logic
+
+    private func startExport() {
+        let outputURL = resolveOutputURL()
+        let preset = mapToExportPreset()
+
+        exportError = nil
+        exportComplete = false
+
+        exportTask = Task {
+            do {
+                try await engine.export.export(to: outputURL, preset: preset)
+                await MainActor.run {
+                    exportComplete = true
+                }
+            } catch {
+                if !Task.isCancelled {
+                    await MainActor.run {
+                        exportError = error.localizedDescription
+                    }
+                }
+            }
+        }
+    }
+
+    private func cancelExport() {
+        exportTask?.cancel()
+        exportTask = nil
+    }
+
+    private func resolveOutputURL() -> URL {
+        let expanded = NSString(string: outputPath).expandingTildeInPath
+        return URL(fileURLWithPath: expanded)
+    }
+
+    /// Map the UI picker selections to the backend ExportPreset enum.
+    private func mapToExportPreset() -> ExportPreset {
+        switch selectedFormat {
+        case .h264:
+            return selectedResolution == .r4k ? .h264_4k : .h264_1080p
+        case .h265:
+            return selectedResolution == .r4k ? .h265_4k : .h265_1080p
+        case .prores422:
+            return .prores422
+        case .prores4444:
+            return .prores4444
+        case .proresProxy:
+            return .proresProxy
+        }
+    }
+
+    private func browseOutputLocation() {
+        let panel = NSSavePanel()
+        panel.title = "Export Location"
+        panel.nameFieldStringValue = URL(fileURLWithPath: outputPath).lastPathComponent
+        panel.allowedContentTypes = [.movie, .mpeg4Movie, .quickTimeMovie]
+
+        if panel.runModal() == .OK, let url = panel.url {
+            outputPath = url.path
         }
     }
 

@@ -243,6 +243,19 @@ public struct SpeedChangeCommand: Command {
     }
 }
 
+public struct SetSpeedRampCommand: Command {
+    public static let typeIdentifier = "editing.setSpeedRamp"
+    public let clipID: UUID
+    public let curve: TimeRemapCurve?
+    public var undoDescription: String { "Speed Ramp" }
+    public var isMutating: Bool { true }
+
+    public init(clipID: UUID, curve: TimeRemapCurve?) {
+        self.clipID = clipID
+        self.curve = curve
+    }
+}
+
 public struct AppendAtEndCommand: Command {
     public static let typeIdentifier = "editing.appendAtEnd"
     public let sourceAssetID: UUID

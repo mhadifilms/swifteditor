@@ -4,6 +4,27 @@ import MediaManager
 import CoreMediaPlus
 import UniformTypeIdentifiers
 
+// MARK: - Media Asset Transfer (Drag & Drop)
+
+/// Lightweight transferable payload for dragging a media asset from the browser.
+struct MediaAssetTransfer: Codable, Transferable, Sendable {
+    let assetID: UUID
+    /// Duration in seconds, for computing source out point on drop.
+    let durationSeconds: Double
+    /// Whether this asset has video content.
+    let hasVideo: Bool
+    /// Whether this asset has audio content.
+    let hasAudio: Bool
+
+    static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(contentType: .mediaAssetTransfer)
+    }
+}
+
+extension UTType {
+    static let mediaAssetTransfer = UTType(exportedAs: "com.swifteditor.mediaAssetTransfer")
+}
+
 /// Sidebar panel for browsing and importing media assets.
 struct MediaBrowserView: View {
     let engine: SwiftEditorEngine
@@ -29,7 +50,7 @@ struct MediaBrowserView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(.bar)
+            .liquidGlassSidebarHeader()
 
             Divider()
 
@@ -40,6 +61,7 @@ struct MediaBrowserView: View {
                     Image(systemName: "photo.on.rectangle.angled")
                         .font(.system(size: 36))
                         .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                     Text("No Media Imported")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -52,6 +74,12 @@ struct MediaBrowserView: View {
             } else {
                 List(engine.allImportedAssets) { asset in
                     MediaAssetRow(asset: asset)
+                        .draggable(MediaAssetTransfer(
+                            assetID: asset.id,
+                            durationSeconds: asset.duration.seconds,
+                            hasVideo: asset.videoParams != nil,
+                            hasAudio: asset.audioParams != nil
+                        ))
                 }
                 .listStyle(.sidebar)
             }
@@ -98,7 +126,19 @@ struct MediaAssetRow: View {
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(asset.name), \(formattedDuration)")
+        .accessibilityLabel("\(asset.name), \(mediaTypeLabel), \(formattedDuration)")
+    }
+
+    private var mediaTypeLabel: String {
+        if asset.videoParams != nil && asset.audioParams != nil {
+            return "video with audio"
+        } else if asset.videoParams != nil {
+            return "video only"
+        } else if asset.audioParams != nil {
+            return "audio only"
+        } else {
+            return "file"
+        }
     }
 
     private var iconName: String {

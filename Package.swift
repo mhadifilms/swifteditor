@@ -25,6 +25,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.5.0"),
     ],
     targets: [
         // ── Foundation Layer ──────────────────────────────
@@ -86,7 +87,8 @@ let package = Package(
         .target(
             name: "RenderEngine",
             dependencies: ["CoreMediaPlus", "EffectsEngine"],
-            path: "Sources/RenderEngine"
+            path: "Sources/RenderEngine",
+            resources: [.process("ScopeShaders.metal")]
         ),
         .testTarget(
             name: "RenderEngineTests",
@@ -133,7 +135,7 @@ let package = Package(
         // ── Audio Layer ──────────────────────────────────
         .target(
             name: "AudioEngine",
-            dependencies: ["CoreMediaPlus"],
+            dependencies: ["CoreMediaPlus", "PluginKit"],
             path: "Sources/AudioEngine"
         ),
         .testTarget(
@@ -204,6 +206,21 @@ let package = Package(
             path: "Tests/SwiftEditorAPITests"
         ),
 
+        // ── Performance Benchmarks ──────────────────────────
+        .testTarget(
+            name: "PerformanceTests",
+            dependencies: [
+                "SwiftEditorAPI",
+                "CoreMediaPlus",
+                "CommandBus",
+                "TimelineKit",
+                "RenderEngine",
+                "EffectsEngine",
+                "ProjectModel",
+            ],
+            path: "Tests/PerformanceTests"
+        ),
+
         // ── macOS Application ──────────────────────────────
         .executableTarget(
             name: "SwiftEditorApp",
@@ -218,6 +235,7 @@ let package = Package(
                 "AudioEngine",
                 "CommandBus",
                 "EffectsEngine",
+                .product(name: "Sparkle", package: "Sparkle"),
             ],
             path: "Sources/SwiftEditorApp",
             exclude: ["Resources"]

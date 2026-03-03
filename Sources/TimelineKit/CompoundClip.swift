@@ -25,14 +25,7 @@ public final class CompoundClipModel: @unchecked Sendable {
 
 extension TimelineModel {
 
-    /// Registry of compound clips associated with this timeline.
-    /// Keyed by compound clip ID.
-    nonisolated(unsafe) private static var _compoundClips: [ObjectIdentifier: [UUID: CompoundClipModel]] = [:]
-
-    public var compoundClips: [UUID: CompoundClipModel] {
-        get { Self._compoundClips[ObjectIdentifier(self)] ?? [:] }
-        set { Self._compoundClips[ObjectIdentifier(self)] = newValue }
-    }
+    // compoundClips is now a stored property on TimelineModel
 
     /// Create a compound clip from selected clips on a single track.
     /// The clips are removed from the parent timeline and replaced by a single
