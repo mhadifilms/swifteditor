@@ -15,9 +15,17 @@ final class UpdateManager: ObservableObject {
     @Published var canCheckForUpdates = false
 
     init() {
-        // Initialize Sparkle with default UI and no delegate
+        // Only auto-start Sparkle in release builds with a valid appcast configured.
+        // In debug builds the updater cannot function (no code signing / no appcast URL)
+        // and would log a distracting error on launch.
+        #if DEBUG
+        let shouldStart = false
+        #else
+        let shouldStart = Bundle.main.infoDictionary?["SUFeedURL"] != nil
+        #endif
+
         updaterController = SPUStandardUpdaterController(
-            startingUpdater: true,
+            startingUpdater: shouldStart,
             updaterDelegate: nil,
             userDriverDelegate: nil
         )

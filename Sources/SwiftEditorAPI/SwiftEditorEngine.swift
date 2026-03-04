@@ -92,6 +92,7 @@ public final class SwiftEditorEngine: @unchecked Sendable {
     private let compositionBuilder: CompositionBuilder
     private var importedAssets: [UUID: MediaManager.ImportedAsset] = [:]
     private var assetCache: [UUID: AVURLAsset] = [:]
+    public private(set) var allImportedAssets: [MediaManager.ImportedAsset] = []
 
     // MARK: - Initialization
 
@@ -173,6 +174,9 @@ public final class SwiftEditorEngine: @unchecked Sendable {
         // Capture timeline and transport directly to avoid self-before-init issue
         let tl = timeline
         let tp = transport
+        let mediaAPI = media
+        let engineRef = EngineRef()
+        let stacks = effectStacks
         self.network = NetworkAPI(
             dispatcher: dispatcher,
             timelineProvider: { tl },
@@ -181,8 +185,49 @@ public final class SwiftEditorEngine: @unchecked Sendable {
                     currentTime: tp.currentTime.seconds,
                     isPlaying: tp.isPlaying
                 )
+            },
+            importHandler: { @Sendable urls in
+                let imported = try await mediaAPI.importAssetsDirectly(from: urls)
+                await MainActor.run { engineRef.engine?.registerImportedAssets(imported) }
+                return imported.map { ["id": $0.id.uuidString, "name": $0.name, "url": $0.url.path] }
+            },
+            rebuildHandler: { @Sendable in
+                await engineRef.engine?.rebuildPlaybackComposition()
+            },
+            effectsHandler: { @Sendable action in
+                switch action {
+                case .add(let clipID, let effectName):
+                    let effect = EffectInstance(pluginID: "com.apple.coreimage", name: effectName)
+                    await MainActor.run { stacks.stack(for: clipID).append(effect) }
+                    return ["success": true, "effectID": effect.id.uuidString, "effectName": effectName]
+                case .setParameter(let clipID, let effectIndex, let parameterName, let value):
+                    let stack = await MainActor.run { stacks.stack(for: clipID) }
+                    guard effectIndex < stack.effects.count else {
+                        throw CommandError.executionFailed("Effect index \(effectIndex) out of range")
+                    }
+                    let effect = stack.effects[effectIndex]
+                    await MainActor.run { effect.parameters[parameterName] = .float(value) }
+                    return ["success": true, "effectID": effect.id.uuidString]
+                case .addKeyframe(let clipID, let effectIndex, let parameterName, let time, let value):
+                    let stack = await MainActor.run { stacks.stack(for: clipID) }
+                    guard effectIndex < stack.effects.count else {
+                        throw CommandError.executionFailed("Effect index \(effectIndex) out of range")
+                    }
+                    let effect = stack.effects[effectIndex]
+                    let keyframe = KeyframeTrack.Keyframe(time: time, value: .float(value))
+                    await MainActor.run {
+                        if effect.keyframeTracks[parameterName] == nil {
+                            effect.keyframeTracks[parameterName] = KeyframeTrack()
+                        }
+                        effect.keyframeTracks[parameterName]?.addKeyframe(keyframe)
+                    }
+                    return ["success": true, "effectID": effect.id.uuidString]
+                }
             }
         )
+
+        // Now all stored properties are initialized — set up self-referencing callbacks
+        engineRef.engine = self
 
         // Wire proxy URL resolver into the composition builder
         let proxyManager = proxy.manager
@@ -197,6 +242,71 @@ public final class SwiftEditorEngine: @unchecked Sendable {
 
         // Register command handlers
         Task { await registerHandlers() }
+
+        // Register command types for serialization (needed by network API)
+        registerCommandTypes()
+    }
+
+    private func registerCommandTypes() {
+        let registry = CommandRegistry.shared
+        // Editing commands
+        registry.register(AddClipCommand.self)
+        registry.register(MoveClipCommand.self)
+        registry.register(TrimClipCommand.self)
+        registry.register(SplitClipCommand.self)
+        registry.register(DeleteClipCommand.self)
+        registry.register(AddTrackCommand.self)
+        registry.register(RemoveTrackCommand.self)
+        registry.register(InsertEditCommand.self)
+        registry.register(OverwriteEditCommand.self)
+        registry.register(RippleDeleteCommand.self)
+        registry.register(RippleTrimCommand.self)
+        registry.register(RollTrimCommand.self)
+        registry.register(SlipCommand.self)
+        registry.register(SlideCommand.self)
+        registry.register(BladeAllCommand.self)
+        registry.register(SpeedChangeCommand.self)
+        registry.register(AppendAtEndCommand.self)
+        registry.register(PlaceOnTopCommand.self)
+        registry.register(RippleOverwriteCommand.self)
+        registry.register(FitToFillCommand.self)
+        registry.register(ReplaceEditCommand.self)
+        // Marker commands
+        registry.register(AddMarkerCommand.self)
+        registry.register(RemoveMarkerCommand.self)
+        // Effect commands
+        registry.register(AddEffectCommand.self)
+        registry.register(RemoveEffectCommand.self)
+        registry.register(SetEffectParameterCommand.self)
+        registry.register(ToggleEffectCommand.self)
+        registry.register(MoveEffectCommand.self)
+        registry.register(AddKeyframeCommand.self)
+        registry.register(RemoveKeyframeCommand.self)
+        // Transition commands
+        registry.register(AddTransitionCommand.self)
+        registry.register(RemoveTransitionCommand.self)
+        // Playback commands
+        registry.register(PlayCommand.self)
+        registry.register(PauseCommand.self)
+        registry.register(StopCommand.self)
+        registry.register(SeekCommand.self)
+        registry.register(StepForwardCommand.self)
+        registry.register(StepBackwardCommand.self)
+        // Timeline extended commands
+        registry.register(CreateCompoundClipCommand.self)
+        registry.register(FlattenCompoundClipCommand.self)
+        registry.register(CreateMulticamClipCommand.self)
+        registry.register(SwitchAngleCommand.self)
+        // Subtitle commands
+        registry.register(AddSubtitleTrackCommand.self)
+        registry.register(RemoveSubtitleTrackCommand.self)
+        registry.register(AddSubtitleCueCommand.self)
+        registry.register(RemoveSubtitleCueCommand.self)
+        registry.register(UpdateSubtitleCueCommand.self)
+        // Project commands
+        registry.register(SaveProjectCommand.self)
+        registry.register(LoadProjectCommand.self)
+        registry.register(ExportCommand.self)
     }
 
     // MARK: - Handler Registration
@@ -243,6 +353,7 @@ public final class SwiftEditorEngine: @unchecked Sendable {
                     self?.importedAssets[asset.id] = asset
                     self?.assetCache[asset.id] = AVURLAsset(url: asset.url)
                 }
+                self?.didUpdateImportedAssets()
             }
         ))
 
@@ -316,14 +427,79 @@ public final class SwiftEditorEngine: @unchecked Sendable {
         importedAssets[id]
     }
 
-    /// Get all imported assets
-    public var allImportedAssets: [MediaManager.ImportedAsset] {
-        Array(importedAssets.values)
+    /// Register externally-imported assets (e.g. from drag-and-drop).
+    public func registerImportedAssets(_ assets: [MediaManager.ImportedAsset]) {
+        for asset in assets {
+            importedAssets[asset.id] = asset
+            assetCache[asset.id] = AVURLAsset(url: asset.url)
+        }
+        didUpdateImportedAssets()
+    }
+
+    /// Sync the stored allImportedAssets array from the internal dict.
+    private func didUpdateImportedAssets() {
+        allImportedAssets = Array(importedAssets.values)
     }
 
     /// Sync project changes from ProjectAPI back to the engine
     internal func syncProject() {
         self.project = projectBox.project
+    }
+
+    // MARK: - Playback Composition
+
+    /// Rebuild the AVPlayer composition from the current timeline and asset cache,
+    /// then set it on the transport controller so the viewer can display frames.
+    @MainActor
+    public func rebuildPlaybackComposition() async {
+        let videoTrackData = timeline.videoTracks.map { track in
+            CompositionBuilder.TrackBuildData(
+                trackID: track.id,
+                clips: timeline.clipsOnTrack(track.id).map { clip in
+                    CompositionBuilder.ClipBuildData(
+                        clipID: clip.id,
+                        asset: assetCache[clip.sourceAssetID],
+                        startTime: clip.startTime,
+                        sourceIn: clip.sourceIn,
+                        sourceOut: clip.sourceOut,
+                        effectStack: effectStacks.hasEffects(for: clip.id) ? effectStacks.stack(for: clip.id) : nil
+                    )
+                }
+            )
+        }
+
+        let audioTrackData = timeline.audioTracks.map { track in
+            CompositionBuilder.TrackBuildData(
+                trackID: track.id,
+                clips: timeline.clipsOnTrack(track.id).map { clip in
+                    CompositionBuilder.ClipBuildData(
+                        clipID: clip.id,
+                        asset: assetCache[clip.sourceAssetID],
+                        startTime: clip.startTime,
+                        sourceIn: clip.sourceIn,
+                        sourceOut: clip.sourceOut
+                    )
+                }
+            )
+        }
+
+        // Only rebuild if there are clips with resolved assets
+        let hasVideoClips = videoTrackData.flatMap(\.clips).contains { $0.asset != nil }
+        let hasAudioClips = audioTrackData.flatMap(\.clips).contains { $0.asset != nil }
+        guard hasVideoClips || hasAudioClips else { return }
+
+        do {
+            let playerItem = try await compositionBuilder.buildPlayerItem(
+                videoTracks: videoTrackData,
+                audioTracks: audioTrackData,
+                renderSize: CGSize(width: 1920, height: 1080),
+                frameDuration: CMTime(value: 1, timescale: 24)
+            )
+            let player = AVPlayer(playerItem: playerItem)
+            transport.setPlayer(player)
+        } catch {
+            print("[SwiftEditorEngine] Failed to build playback composition: \(error)")
+        }
     }
 }
 
@@ -337,4 +513,12 @@ final class ProjectBox: @unchecked Sendable {
     init(project: Project = Project()) {
         self.project = project
     }
+}
+
+// MARK: - EngineRef (breaks init cycle for Sendable closures)
+
+/// Weak reference box allowing @Sendable closures created during init
+/// to call back into the engine after initialization completes.
+private final class EngineRef: @unchecked Sendable {
+    weak var engine: SwiftEditorEngine?
 }

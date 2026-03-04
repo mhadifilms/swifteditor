@@ -4,6 +4,7 @@ import SwiftEditorAPI
 import TimelineKit
 import CoreMediaPlus
 import ViewerKit
+import UniformTypeIdentifiers
 
 // MARK: - Keyboard Event Handler
 
@@ -308,6 +309,14 @@ struct MainWindowView: View {
                 .accessibilityLabel("Toggle Inspector")
                 .accessibilityHint("Shows or hides the clip properties inspector")
             }
+        }
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            Task {
+                let urls = await extractFileURLs(from: providers)
+                guard !urls.isEmpty else { return }
+                _ = try? await engine.media.importMedia(urls: urls)
+            }
+            return true
         }
         .onChange(of: workspace.currentWorkspace) { _, newValue in
             sidebarTab = workspace.configuration.sidebarTab

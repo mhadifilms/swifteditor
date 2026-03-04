@@ -14,6 +14,10 @@ struct SwiftEditorApp: App {
             MainWindowView(engine: engine)
                 .environment(panelState)
                 .frame(minWidth: 1200, minHeight: 700)
+                .onAppear {
+                    // Start network API server for remote control
+                    try? engine.network.start()
+                }
         }
         .commands {
             AppMenuCommands(engine: engine)

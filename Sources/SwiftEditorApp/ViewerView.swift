@@ -21,6 +21,7 @@ import SwiftEditorAPI
 import ViewerKit
 import RenderEngine
 import CoreMediaPlus
+import UniformTypeIdentifiers
 
 // MARK: - ViewerMode
 
@@ -78,6 +79,7 @@ struct ViewerView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .labelsHidden()
             .frame(maxWidth: 180)
             .accessibilityLabel("Viewer mode")
 
@@ -91,6 +93,7 @@ struct ViewerView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                .labelsHidden()
                 .frame(maxWidth: 160)
                 .accessibilityLabel("Comparison mode")
             }
@@ -150,9 +153,32 @@ struct ViewerView: View {
             }
         }
         .aspectRatio(16.0 / 9.0, contentMode: .fit)
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            Task { @MainActor in
+                let urls = await extractFileURLs(from: providers)
+                guard !urls.isEmpty else { return }
+                if let assets = try? await engine.media.importAssetsDirectly(from: urls) {
+                    engine.registerImportedAssets(assets)
+                    // Place on first video track at playhead
+                    if let firstVideoTrack = engine.timeline.videoTracks.first {
+                        let playheadTime = engine.transport.currentTime
+                        for asset in assets {
+                            _ = try? await engine.editing.insertEdit(
+                                sourceAssetID: asset.id,
+                                trackID: firstVideoTrack.id,
+                                at: playheadTime,
+                                sourceIn: .zero,
+                                sourceOut: asset.duration
+                            )
+                        }
+                    }
+                }
+            }
+            return true
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Program viewer")
-        .accessibilityHint("Displays the current frame at the playhead position")
+        .accessibilityHint("Displays the current frame at the playhead position. Drop media files to import and place at playhead.")
     }
 
     // MARK: - Source Viewer

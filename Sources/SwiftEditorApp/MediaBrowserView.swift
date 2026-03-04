@@ -25,6 +25,37 @@ extension UTType {
     static let mediaAssetTransfer = UTType(exportedAs: "com.swifteditor.mediaAssetTransfer")
 }
 
+// MARK: - File URL Extraction
+
+/// Supported media file extensions for drag-and-drop import.
+private let supportedMediaExtensions: Set<String> = [
+    "mov", "mp4", "m4v", "mkv", "avi", "mxf", "ts",
+    "wav", "mp3", "aac", "m4a", "aiff", "flac",
+    "png", "jpg", "jpeg", "tiff", "tif", "bmp", "heic", "exr"
+]
+
+/// Extract file URLs from NSItemProviders, filtering to supported media types.
+func extractFileURLs(from providers: [NSItemProvider]) async -> [URL] {
+    var urls: [URL] = []
+    for provider in providers {
+        guard provider.hasItemConformingToTypeIdentifier("public.file-url") else { continue }
+        if let url = await withCheckedContinuation({ (cont: CheckedContinuation<URL?, Never>) in
+            provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { item, _ in
+                if let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) {
+                    cont.resume(returning: url)
+                } else {
+                    cont.resume(returning: nil)
+                }
+            }
+        }) {
+            if supportedMediaExtensions.contains(url.pathExtension.lowercased()) {
+                urls.append(url)
+            }
+        }
+    }
+    return urls
+}
+
 /// Sidebar panel for browsing and importing media assets.
 struct MediaBrowserView: View {
     let engine: SwiftEditorEngine
@@ -83,6 +114,14 @@ struct MediaBrowserView: View {
                 }
                 .listStyle(.sidebar)
             }
+        }
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            Task {
+                let urls = await extractFileURLs(from: providers)
+                guard !urls.isEmpty else { return }
+                _ = try? await engine.media.importMedia(urls: urls)
+            }
+            return true
         }
         .fileImporter(
             isPresented: $isImporting,

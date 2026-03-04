@@ -42,15 +42,22 @@ struct ToolbarView: View {
 
                 // Snapping toggle
                 Button {
-                    // Toggle snapping
+                    engine.snap.setEnabled(!engine.snap.isEnabled)
                 } label: {
                     Image(systemName: "magnet")
                         .frame(width: 28, height: 22)
                 }
                 .liquidGlassButton()
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(engine.snap.isEnabled
+                              ? Color.accentColor.opacity(0.2)
+                              : Color.clear)
+                )
                 .help("Toggle Snapping (N)")
                 .accessibilityLabel("Toggle Snapping")
                 .accessibilityHint("Enable or disable timeline snapping. Shortcut: N")
+                .accessibilityAddTraits(engine.snap.isEnabled ? .isSelected : [])
 
                 Spacer()
 

@@ -7,6 +7,7 @@ import AudioEngine
 import MediaManager
 import EffectsEngine
 import CoreMediaPlus
+import UniformTypeIdentifiers
 
 /// The timeline panel with track headers, clip lanes, ruler, and playhead.
 struct TimelinePanelView: View {
@@ -295,6 +296,22 @@ struct TrackLaneView: View {
                 .onTapGesture {
                     engine.timeline.selection = .empty
                 }
+                .contextMenu {
+                    Button("Paste") {
+                        // Placeholder for paste operation
+                    }
+                    Button("Add Marker at Playhead") {
+                        engine.timeline.requestAddMarker(
+                            name: "",
+                            at: engine.transport.currentTime
+                        )
+                    }
+                    Button("Select All on Track") {
+                        let trackClips = engine.timeline.clipsOnTrack(track)
+                        let ids = Set(trackClips.map(\.id))
+                        engine.timeline.selection = SelectionState(selectedClipIDs: ids)
+                    }
+                }
 
             // Clips
             ForEach(clips) { clip in
@@ -353,7 +370,7 @@ struct TrackLaneView: View {
         .overlay(alignment: .bottom) {
             Divider()
         }
-        .onDrop(of: [.mediaAssetTransfer], delegate: TrackLaneDropDelegate(
+        .onDrop(of: [.mediaAssetTransfer, .fileURL], delegate: TrackLaneDropDelegate(
             trackID: track,
             pixelsPerSecond: pixelsPerSecond,
             engine: engine,
@@ -387,6 +404,7 @@ struct TrackLaneView: View {
 
 /// Handles drag-and-drop of media assets onto a timeline track lane.
 /// Shows a vertical drop indicator during hover and performs an insert edit on drop.
+/// Accepts both internal media asset transfers and external file URLs from Finder.
 struct TrackLaneDropDelegate: DropDelegate {
     let trackID: UUID
     let pixelsPerSecond: CGFloat
@@ -394,7 +412,8 @@ struct TrackLaneDropDelegate: DropDelegate {
     @Binding var dropIndicatorX: CGFloat?
 
     func validateDrop(info: DropInfo) -> Bool {
-        info.hasItemsConforming(to: [.mediaAssetTransfer])
+        info.hasItemsConforming(to: [.mediaAssetTransfer]) ||
+        info.hasItemsConforming(to: [.fileURL])
     }
 
     func dropEntered(info: DropInfo) {
@@ -412,27 +431,53 @@ struct TrackLaneDropDelegate: DropDelegate {
 
     func performDrop(info: DropInfo) -> Bool {
         dropIndicatorX = nil
-        let providers = info.itemProviders(for: [.mediaAssetTransfer])
-        guard let provider = providers.first else { return false }
 
         let dropX = max(0, info.location.x)
         let dropSeconds = Double(dropX) / Double(pixelsPerSecond)
         let dropTime = Rational(seconds: dropSeconds)
 
-        provider.loadDataRepresentation(forTypeIdentifier: "com.swifteditor.mediaAssetTransfer") { data, _ in
-            guard let data,
-                  let transfer = try? JSONDecoder().decode(MediaAssetTransfer.self, from: data)
-            else { return }
+        // Try internal media asset transfer first
+        let assetProviders = info.itemProviders(for: [.mediaAssetTransfer])
+        if let provider = assetProviders.first {
+            provider.loadDataRepresentation(forTypeIdentifier: "com.swifteditor.mediaAssetTransfer") { data, _ in
+                guard let data,
+                      let transfer = try? JSONDecoder().decode(MediaAssetTransfer.self, from: data)
+                else { return }
 
-            let sourceOut = Rational(seconds: transfer.durationSeconds)
-            Task { @MainActor in
-                try? await engine.editing.insertEdit(
-                    sourceAssetID: transfer.assetID,
-                    trackID: trackID,
-                    at: dropTime,
-                    sourceIn: .zero,
-                    sourceOut: sourceOut
-                )
+                let sourceOut = Rational(seconds: transfer.durationSeconds)
+                Task { @MainActor in
+                    try? await engine.editing.insertEdit(
+                        sourceAssetID: transfer.assetID,
+                        trackID: trackID,
+                        at: dropTime,
+                        sourceIn: .zero,
+                        sourceOut: sourceOut
+                    )
+                }
+            }
+            return true
+        }
+
+        // Fall back to file URL drops from Finder
+        let fileProviders = info.itemProviders(for: [.fileURL])
+        guard !fileProviders.isEmpty else { return false }
+
+        Task { @MainActor in
+            let urls = await extractFileURLs(from: fileProviders)
+            guard !urls.isEmpty else { return }
+            if let assets = try? await engine.media.importAssetsDirectly(from: urls) {
+                engine.registerImportedAssets(assets)
+                var insertTime = dropTime
+                for asset in assets {
+                    _ = try? await engine.editing.insertEdit(
+                        sourceAssetID: asset.id,
+                        trackID: trackID,
+                        at: insertTime,
+                        sourceIn: .zero,
+                        sourceOut: asset.duration
+                    )
+                    insertTime = insertTime + asset.duration
+                }
             }
         }
         return true
@@ -451,6 +496,8 @@ struct ClipView: View {
     let engine: SwiftEditorEngine
 
     private let trimHandleWidth: CGFloat = 6
+    @State private var dragOffset: CGSize = .zero
+    @State private var isDragging: Bool = false
 
     var body: some View {
         let width = max(CGFloat(clip.duration.seconds) * pixelsPerSecond, 4)
@@ -490,7 +537,7 @@ struct ClipView: View {
                         Image(systemName: "sparkles")
                             .font(.system(size: 7))
                     }
-                    Text(clip.sourceAssetID.uuidString.prefix(6))
+                    Text(clipDisplayName)
                         .font(.system(size: 9))
                         .lineLimit(1)
                 }
@@ -538,8 +585,12 @@ struct ClipView: View {
             }
         }
         .frame(width: width)
-        .opacity(clip.isEnabled ? 1.0 : 0.4)
+        .offset(x: isDragging ? dragOffset.width : 0)
+        .zIndex(isDragging ? 100 : 0)
+        .opacity(isDragging ? 0.7 : (clip.isEnabled ? 1.0 : 0.4))
         .shadow(color: isSelected ? (isVideo ? Color.blue : Color.green).opacity(0.5) : .clear, radius: 4)
+        .gesture(clipDragGesture)
+        .contextMenu { clipContextMenu }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(isVideo ? "Video" : "Audio") clip\(isSelected ? ", selected" : "")\(clip.isEnabled ? "" : ", disabled")")
         .accessibilityHint("Tap to select this clip. Shift+click to add to selection, Command+click to toggle")
@@ -558,6 +609,17 @@ struct ClipView: View {
         engine.effectStacks.hasEffects(for: clip.id)
     }
 
+    private var clipDisplayName: String {
+        if let asset = engine.importedAsset(by: clip.sourceAssetID) {
+            // Show the filename without extension
+            return URL(fileURLWithPath: asset.name).deletingPathExtension().lastPathComponent
+        }
+        // Fall back to a short clip label with timecode
+        let startSec = Int(clip.startTime.seconds)
+        let durSec = Int(clip.duration.seconds)
+        return "\(isVideo ? "V" : "A") \(startSec)s–\(startSec + durSec)s"
+    }
+
     private func trimDragGesture(edge: TrimEdge) -> some Gesture {
         DragGesture(minimumDistance: 2)
             .onEnded { value in
@@ -572,6 +634,88 @@ struct ClipView: View {
                 }
                 engine.timeline.requestClipResize(clipID: clip.id, edge: edge, to: newTime)
             }
+    }
+
+    /// Drag gesture for moving clips when selection tool is active.
+    private var clipDragGesture: some Gesture {
+        DragGesture(minimumDistance: 5)
+            .onChanged { value in
+                guard selectedTool == .selection else { return }
+                isDragging = true
+                dragOffset = value.translation
+            }
+            .onEnded { value in
+                guard selectedTool == .selection else { return }
+                isDragging = false
+                let deltaSeconds = Double(value.translation.width) / Double(pixelsPerSecond)
+                let delta = Rational(Int64(deltaSeconds * 600), 600)
+                var newPosition = clip.startTime + delta
+                if newPosition < .zero { newPosition = .zero }
+                if engine.snap.isEnabled {
+                    newPosition = engine.snap.snap(newPosition)
+                }
+                engine.timeline.requestClipMove(
+                    clipID: clip.id,
+                    toTrackID: clip.trackID,
+                    at: newPosition
+                )
+                dragOffset = .zero
+            }
+    }
+
+    /// Right-click context menu for clip operations.
+    @ViewBuilder
+    private var clipContextMenu: some View {
+        Button("Cut") {
+            engine.timeline.selection = SelectionState(selectedClipIDs: [clip.id])
+        }
+        Button("Copy") {
+            engine.timeline.selection = SelectionState(selectedClipIDs: [clip.id])
+        }
+
+        Divider()
+
+        Button("Delete") {
+            engine.timeline.requestClipDelete(clipID: clip.id)
+        }
+        Button("Ripple Delete") {
+            engine.timeline.requestRippleDelete(clipID: clip.id)
+        }
+
+        Divider()
+
+        Button("Split at Playhead") {
+            engine.timeline.requestClipSplit(clipID: clip.id, at: engine.transport.currentTime)
+        }
+        .disabled(!playheadInsideClip)
+
+        Divider()
+
+        Button(clip.isEnabled ? "Disable Clip" : "Enable Clip") {
+            if let clipModel = engine.timeline.clip(by: clip.id) {
+                clipModel.isEnabled.toggle()
+            }
+        }
+
+        Divider()
+
+        Menu("Speed") {
+            ForEach([0.25, 0.5, 1.0, 2.0, 4.0], id: \.self) { speed in
+                Button(String(format: "%.2fx", speed)) {
+                    Task {
+                        _ = try? await engine.editing.setSpeed(
+                            clip.id,
+                            newSpeed: speed
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private var playheadInsideClip: Bool {
+        let time = engine.transport.currentTime
+        return time >= clip.startTime && time < clip.startTime + clip.duration
     }
 }
 

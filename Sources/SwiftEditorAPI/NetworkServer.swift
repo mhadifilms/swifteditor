@@ -28,6 +28,16 @@ public final class NetworkServer: @unchecked Sendable {
     private let dispatcher: CommandDispatcher
     private let timelineProvider: @Sendable () -> TimelineModel?
     private let transportStateProvider: @Sendable () -> NetworkTransportState
+    private let importHandler: (@Sendable ([URL]) async throws -> [[String: String]])?
+    private let rebuildHandler: (@Sendable () async -> Void)?
+    private let effectsHandler: (@Sendable (EffectsAction) async throws -> [String: Any])?
+
+    /// Actions the network server can perform on effect stacks.
+    public enum EffectsAction: Sendable {
+        case add(clipID: UUID, effectName: String)
+        case setParameter(clipID: UUID, effectIndex: Int, parameterName: String, value: Double)
+        case addKeyframe(clipID: UUID, effectIndex: Int, parameterName: String, time: Rational, value: Double)
+    }
 
     public private(set) var isRunning = false
 
@@ -35,12 +45,18 @@ public final class NetworkServer: @unchecked Sendable {
         configuration: NetworkServerConfiguration = NetworkServerConfiguration(),
         dispatcher: CommandDispatcher,
         timelineProvider: @escaping @Sendable () -> TimelineModel?,
-        transportStateProvider: @escaping @Sendable () -> NetworkTransportState
+        transportStateProvider: @escaping @Sendable () -> NetworkTransportState,
+        importHandler: (@Sendable ([URL]) async throws -> [[String: String]])? = nil,
+        rebuildHandler: (@Sendable () async -> Void)? = nil,
+        effectsHandler: (@Sendable (EffectsAction) async throws -> [String: Any])? = nil
     ) {
         self.configuration = configuration
         self.dispatcher = dispatcher
         self.timelineProvider = timelineProvider
         self.transportStateProvider = transportStateProvider
+        self.importHandler = importHandler
+        self.rebuildHandler = rebuildHandler
+        self.effectsHandler = effectsHandler
     }
 
     // MARK: - Server Lifecycle
@@ -113,11 +129,20 @@ public final class NetworkServer: @unchecked Sendable {
         case ("GET", "/transport"):
             return getTransport()
 
+        case ("POST", "/import"):
+            return await postImport(body: request.body)
+
         case ("POST", "/commands"):
             return await postCommand(body: request.body)
 
         case ("POST", "/script"):
             return await postScript(body: request.body)
+
+        case ("POST", "/rebuild"):
+            return await postRebuild()
+
+        case ("POST", "/effects"):
+            return await postEffects(body: request.body)
 
         default:
             return HTTPResponse(status: 404, body: #"{"error":"Not Found"}"#)
@@ -164,10 +189,28 @@ public final class NetworkServer: @unchecked Sendable {
             ])
         }
 
+        var subtitleTracks: [[String: Any]] = []
+        for track in timeline.subtitleTracks {
+            let cues = track.sortedCues.map { cue -> [String: Any] in
+                [
+                    "id": cue.id.uuidString,
+                    "text": cue.text,
+                    "startTime": cue.startTime.seconds,
+                    "duration": cue.duration.seconds,
+                ]
+            }
+            subtitleTracks.append([
+                "id": track.id.uuidString,
+                "name": track.name,
+                "cues": cues,
+            ])
+        }
+
         let response: [String: Any] = [
             "duration": timeline.duration.seconds,
             "videoTracks": videoTracks,
             "audioTracks": audioTracks,
+            "subtitleTracks": subtitleTracks,
         ]
 
         return jsonResponse(response)
@@ -182,6 +225,31 @@ public final class NetworkServer: @unchecked Sendable {
         return jsonResponse(response)
     }
 
+    private func postImport(body: Data?) async -> HTTPResponse {
+        guard let body, !body.isEmpty else {
+            return HTTPResponse(status: 400, body: #"{"error":"Empty body"}"#)
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let urlStrings = json["urls"] as? [String] else {
+            return HTTPResponse(status: 400, body: #"{"error":"Expected {\"urls\":[...]}"}"#)
+        }
+        guard let handler = importHandler else {
+            return HTTPResponse(status: 501, body: #"{"error":"Import not configured"}"#)
+        }
+        let urls = urlStrings.map { URL(fileURLWithPath: $0) }
+        do {
+            let assets = try await handler(urls)
+            let response: [String: Any] = [
+                "success": true,
+                "imported": urls.count,
+                "assets": assets,
+            ]
+            return jsonResponse(response)
+        } catch {
+            return HTTPResponse(status: 422, body: #"{"error":"\#(error)"}"#)
+        }
+    }
+
     private func postCommand(body: Data?) async -> HTTPResponse {
         guard let body, !body.isEmpty else {
             return HTTPResponse(status: 400, body: #"{"error":"Empty body"}"#)
@@ -192,9 +260,23 @@ public final class NetworkServer: @unchecked Sendable {
             return HTTPResponse(status: 400, body: #"{"error":"Invalid JSON, expected {\"type\":\"...\", ...}"}"#)
         }
 
-        // Deserialize and dispatch via CommandSerializer
+        // Handle media.import specially (URLs don't serialize through command bus)
+        if type == "media.import" {
+            return await postImport(body: body)
+        }
+
+        // Convert flat JSON {"type":"...", ...fields} into the envelope format
+        // that CommandSerializer expects: {"typeIdentifier":"...", "payload": <base64-data>}
         do {
-            let command = try CommandSerializer.decode(from: body)
+            var payload = json
+            payload.removeValue(forKey: "type")
+            let payloadData = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+            let envelope: [String: Any] = [
+                "typeIdentifier": type,
+                "payload": payloadData.base64EncodedString(),
+            ]
+            let envelopeData = try JSONSerialization.data(withJSONObject: envelope, options: [])
+            let command = try CommandSerializer.decode(from: envelopeData)
             let result = try await dispatcher.dispatch(command)
             switch result {
             case .success:
@@ -236,6 +318,64 @@ public final class NetworkServer: @unchecked Sendable {
             "total": commands.count,
         ]
         return jsonResponse(response)
+    }
+
+    private func postEffects(body: Data?) async -> HTTPResponse {
+        guard let body, !body.isEmpty,
+              let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let action = json["action"] as? String,
+              let clipIDStr = json["clipID"] as? String,
+              let clipID = UUID(uuidString: clipIDStr) else {
+            return HTTPResponse(status: 400, body: #"{"error":"Expected {action, clipID, ...}"}"#)
+        }
+
+        guard let handler = effectsHandler else {
+            return HTTPResponse(status: 501, body: #"{"error":"Effects not configured"}"#)
+        }
+
+        do {
+            let effectsAction: EffectsAction
+            switch action {
+            case "add":
+                guard let effectName = json["effectName"] as? String else {
+                    return HTTPResponse(status: 400, body: #"{"error":"Missing effectName"}"#)
+                }
+                effectsAction = .add(clipID: clipID, effectName: effectName)
+            case "setParameter":
+                guard let effectIndex = json["effectIndex"] as? Int,
+                      let parameterName = json["parameterName"] as? String,
+                      let value = json["value"] as? Double else {
+                    return HTTPResponse(status: 400, body: #"{"error":"Missing effectIndex/parameterName/value"}"#)
+                }
+                effectsAction = .setParameter(clipID: clipID, effectIndex: effectIndex,
+                                              parameterName: parameterName, value: value)
+            case "addKeyframe":
+                guard let effectIndex = json["effectIndex"] as? Int,
+                      let parameterName = json["parameterName"] as? String,
+                      let value = json["value"] as? Double,
+                      let timeArr = json["time"] as? [Int], timeArr.count == 2 else {
+                    return HTTPResponse(status: 400, body: #"{"error":"Missing effectIndex/parameterName/value/time"}"#)
+                }
+                let time = Rational(Int64(timeArr[0]), Int64(timeArr[1]))
+                effectsAction = .addKeyframe(clipID: clipID, effectIndex: effectIndex,
+                                             parameterName: parameterName, time: time, value: value)
+            default:
+                return HTTPResponse(status: 400, body: #"{"error":"Unknown action: \#(action)"}"#)
+            }
+
+            let result = try await handler(effectsAction)
+            return jsonResponse(result)
+        } catch {
+            return HTTPResponse(status: 422, body: #"{"error":"\#(error)"}"#)
+        }
+    }
+
+    private func postRebuild() async -> HTTPResponse {
+        guard let handler = rebuildHandler else {
+            return HTTPResponse(status: 501, body: #"{"error":"Rebuild not configured"}"#)
+        }
+        await handler()
+        return jsonResponse(["success": true, "rebuilt": true])
     }
 
     private func dispatchScriptEntry(_ entry: NetworkScriptEntry) async throws {
